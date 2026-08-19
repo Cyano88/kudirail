@@ -1,0 +1,33 @@
+{
+  "name": "kudirail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "node --watch --import tsx server.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "start": "node --import tsx server.ts",
+    "db:migrate": "node --import tsx scripts/migrate-database.ts",
+    "db:import-accounts": "node --import tsx scripts/import-account-file.ts",
+    "probe:paycrest": "node --import tsx scripts/paycrest-public-probe.ts"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "13.3.2",
+    "dotenv": "17.4.2",
+    "express": "4.22.2",
+    "pg": "8.23.0",
+    "starknet": "10.7.0",
+    "tsx": "4.20.3"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.3",
+    "@types/node": "24.0.15",
+    "@types/pg": "8.23.1",
+    "typescript": "5.8.3"
+  }
+}

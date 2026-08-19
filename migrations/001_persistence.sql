@@ -1,0 +1,10 @@
+BEGIN;
+CREATE TABLE IF NOT EXISTS kudiroll_schema_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS kudiroll_accounts (wallet_address text PRIMARY KEY CHECK (wallet_address ~ '^0x[0-9a-f]{1,64}$'), record jsonb NOT NULL CHECK (record->>'version' = '1' AND record->>'algorithm' = 'aes-256-gcm' AND record ? 'iv' AND record ? 'ciphertext' AND record ? 'tag'), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS kudiroll_auth_sessions (token_hash text PRIMARY KEY, wallet_address text NOT NULL CHECK (wallet_address ~ '^0x[0-9a-f]{1,64}$'), method text NOT NULL CHECK (method IN ('wallet', 'passkey')), credential_id text NOT NULL DEFAULT '', authenticated_at bigint NOT NULL, expires_at bigint NOT NULL);
+CREATE INDEX IF NOT EXISTS kudiroll_auth_sessions_wallet_idx ON kudiroll_auth_sessions (wallet_address);
+CREATE INDEX IF NOT EXISTS kudiroll_auth_sessions_expiry_idx ON kudiroll_auth_sessions (expires_at);
+CREATE TABLE IF NOT EXISTS kudiroll_auth_challenges (storage_key text PRIMARY KEY, purpose text NOT NULL CHECK (purpose IN ('wallet-signin', 'passkey-register', 'passkey-signin', 'passkey-prf', 'passkey-revoke', 'email-verify')), key_hash text NOT NULL, challenge text NOT NULL, wallet_address text NOT NULL, target_credential_id text NOT NULL DEFAULT '', prf_input text, expires_at bigint NOT NULL);
+CREATE INDEX IF NOT EXISTS kudiroll_auth_challenges_expiry_idx ON kudiroll_auth_challenges (expires_at);
+INSERT INTO kudiroll_schema_migrations (version) VALUES (1) ON CONFLICT DO NOTHING;
+COMMIT;
