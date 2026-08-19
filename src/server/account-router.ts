@@ -3,7 +3,7 @@ import { Router } from 'express'
 import { RpcProvider, constants } from 'starknet'
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server'
 import type { AuthenticationResponseJSON, RegistrationResponseJSON, WebAuthnCredential } from '@simplewebauthn/server'
-import { addWorker, createPayRun, createTeam, deleteAccount, deleteTeam, findPasskey, getAccount, getEncryptedWalletBackup, markBusinessEmailVerified, publicAccount, publicPayRun, recordTreasuryShield, removePasskey, removeWorker, resolveUnknownPayRun, saveEncryptedWalletBackup, savePasskey, updateBusinessProfile, updatePasskeyCounter, updatePasskeyPrf, updatePayRun, updateTeam } from './account-store'
+import { addWorker, createPayRun, createTeam, deleteAccount, deleteTeam, findPasskey, findVerifiedAccountByEmail, getAccount, getEncryptedWalletBackup, linkVerifiedBusinessEmail, markBusinessEmailVerified, publicAccount, publicPayRun, recordTreasuryShield, removePasskey, removeWorker, resolveUnknownPayRun, saveEncryptedWalletBackup, savePasskey, updateBusinessProfile, updatePasskeyCounter, updatePasskeyPrf, updatePayRun, updateTeam } from './account-store'
 import { consumeAuthChallenge, createAuthSession, deleteAuthSession, deleteAuthSessionsForAddress, deleteAuthSessionsForCredential, getAuthSession, saveAuthChallenge } from './auth-store'
 import { deriveTreasuryReadiness } from '../treasury-readiness'
 import { rateLimit } from './rate-limit'
@@ -36,6 +36,10 @@ function challengeCookieName() {
   return process.env.NODE_ENV === 'production' ? '__Secure-kudiroll_webauthn' : 'kudiroll_webauthn'
 }
 
+function emailLinkCookieName() {
+  return process.env.NODE_ENV === 'production' ? '__Secure-kudiroll_email_link' : 'kudiroll_email_link'
+}
+
 function sessionToken(req: any) {
   const parsed = cookies(req.headers.cookie)
   return parsed[sessionCookieName()] || parsed.kudiroll_session || ''
@@ -46,12 +50,21 @@ function challengeToken(req: any) {
   return parsed[challengeCookieName()] || parsed.kudiroll_webauthn || ''
 }
 
+function emailLinkToken(req: any) {
+  const parsed = cookies(req.headers.cookie)
+  return parsed[emailLinkCookieName()] || parsed.kudiroll_email_link || ''
+}
+
 function sessionCookie(token: string, maxAge = 43200) {
   return `${sessionCookieName()}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
 }
 
 function challengeCookie(token: string, maxAge = 300) {
-  return `${challengeCookieName()}=${token}; HttpOnly; SameSite=Strict; Path=/api/account/passkeys; Max-Age=${maxAge}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
+  return `${challengeCookieName()}=${token}; HttpOnly; SameSite=Strict; Path=/api/account; Max-Age=${maxAge}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
+}
+
+function emailLinkCookie(token: string, maxAge = 600) {
+  return `${emailLinkCookieName()}=${token}; HttpOnly; SameSite=Strict; Path=/api/account/email/link; Max-Age=${maxAge}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
 }
 
 function webauthnSettings(req: any) {
@@ -73,6 +86,22 @@ function emailDeliverySettings() {
 
 function emailCodeHash(code: string, secret: string) {
   return createHmac('sha256', secret).update(code).digest('base64url')
+}
+
+function normalizedEmail(value: unknown) {
+  const email = String(value ?? '').trim().toLowerCase()
+  if (email.length > 160 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error('Enter a valid email address.'), { status: 400 })
+  return email
+}
+
+async function deliverEmailCode(email: string, code: string, settings: ReturnType<typeof emailDeliverySettings>, fetcher: typeof fetch) {
+  const response = await fetcher('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${settings.apiKey}`, 'Content-Type': 'application/json', 'Idempotency-Key': randomBytes(16).toString('hex') },
+    body: JSON.stringify({ from: settings.from, to: [email], subject: 'Your KudiRoll sign-in code', text: `Your KudiRoll code is ${code}. It expires in 10 minutes. This code signs you in but cannot sign transactions, decrypt your embedded wallet, or recover funds.` }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw Object.assign(new Error('The sign-in email could not be delivered.'), { status: 502 })
 }
 
 async function requireSession(req: any) {
@@ -140,8 +169,9 @@ async function treasuryReadiness(address: string) {
   }
 }
 
-export function createAccountRouter() {
+export function createAccountRouter(options: { emailFetcher?: typeof fetch } = {}) {
   const router = Router()
+  const emailFetcher = options.emailFetcher || fetch
   router.use((_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store')
     next()
@@ -242,6 +272,9 @@ export function createAccountRouter() {
         prfInput: stored.prfInput,
         prfCapable: req.body?.prfCapable === true,
       })
+      await deleteAuthSession(token)
+      const replacement = await createAuthSession(address, 'passkey', credential.id)
+      res.append('Set-Cookie', sessionCookie(replacement))
       res.status(201).json({ ok: true, account: publicAccount(await getAccount(address)) })
     } catch (error) {
       res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })
@@ -397,6 +430,66 @@ export function createAccountRouter() {
     res.json({ ok: true, configured: emailDeliverySettings().configured })
   })
 
+  router.post('/email/authentication/request', rateLimit('email-authentication-request', 5, 15 * 60 * 1000), async (req, res) => {
+    try {
+      const email = normalizedEmail(req.body?.email)
+      const settings = emailDeliverySettings()
+      if (!settings.configured) throw Object.assign(new Error('Email sign-in is not configured yet.'), { status: 503 })
+      const account = await findVerifiedAccountByEmail(email)
+      const code = String(randomInt(100000, 1_000_000))
+      await deliverEmailCode(email, code, settings, emailFetcher)
+      const requestId = randomBytes(32).toString('base64url')
+      await saveAuthChallenge(requestId, {
+        purpose: 'email-signin',
+        challenge: emailCodeHash(code, settings.codeSecret),
+        address: account?.walletAddress || '',
+        targetCredentialId: email,
+        expiresAt: Date.now() + 10 * 60 * 1000,
+      })
+      res.setHeader('Set-Cookie', challengeCookie(requestId, 600))
+      res.json({ ok: true, sent: true })
+    } catch (error) {
+      res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })
+    }
+  })
+
+  router.post('/email/authentication/verify', rateLimit('email-authentication-verify', 8, 15 * 60 * 1000), async (req, res) => {
+    try {
+      const settings = emailDeliverySettings()
+      if (!settings.configured) throw Object.assign(new Error('Email sign-in is not configured yet.'), { status: 503 })
+      const code = String(req.body?.code || '').trim()
+      if (!/^\d{6}$/.test(code)) throw Object.assign(new Error('Enter the six-digit sign-in code.'), { status: 400 })
+      const stored = await consumeAuthChallenge(challengeToken(req), 'email-signin')
+      res.setHeader('Set-Cookie', challengeCookie('', 0))
+      const expected = Buffer.from(stored.challenge)
+      const received = Buffer.from(emailCodeHash(code, settings.codeSecret))
+      if (expected.length !== received.length || !timingSafeEqual(expected, received)) throw Object.assign(new Error('The sign-in code is incorrect or expired. Request a new code.'), { status: 401 })
+      if (stored.address) {
+        const token = await createAuthSession(stored.address, 'email')
+        res.append('Set-Cookie', sessionCookie(token))
+        return res.json({ ok: true, mode: 'signin', account: publicAccount(await getAccount(stored.address)) })
+      }
+      const linkToken = randomBytes(32).toString('base64url')
+      await saveAuthChallenge(linkToken, { purpose: 'email-link', challenge: randomBytes(32).toString('base64url'), address: '', targetCredentialId: stored.targetCredentialId, expiresAt: Date.now() + 10 * 60 * 1000 })
+      res.append('Set-Cookie', emailLinkCookie(linkToken))
+      res.json({ ok: true, mode: 'link' })
+    } catch (error) {
+      res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })
+    }
+  })
+
+  router.post('/email/link', rateLimit('email-link', 5, 15 * 60 * 1000), async (req, res) => {
+    try {
+      const current = await requireRecentSession(req, 'wallet')
+      const stored = await consumeAuthChallenge(emailLinkToken(req), 'email-link')
+      await linkVerifiedBusinessEmail(current.session.address, stored.targetCredentialId)
+      res.setHeader('Set-Cookie', emailLinkCookie('', 0))
+      res.json({ ok: true, account: publicAccount(await getAccount(current.session.address)) })
+    } catch (error) {
+      res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })
+    }
+  })
+
   router.post('/email/verification/request', rateLimit('email-verification-request', 3, 15 * 60 * 1000), async (req, res) => {
     try {
       const current = await requireRecentSession(req)
@@ -475,7 +568,7 @@ export function createAccountRouter() {
 
   router.delete('/', async (req, res) => {
     try {
-      const address = await requireSessionAddress(req)
+      const address = (await requireRecentSession(req, 'passkey')).session.address
       if (req.body?.confirmation !== 'DELETE KUDIROLL ACCOUNT') throw Object.assign(new Error('Type DELETE KUDIROLL ACCOUNT to confirm.'), { status: 400 })
       const deleted = await deleteAccount(address)
       await deleteAuthSessionsForAddress(address)

@@ -41,3 +41,10 @@ test('invalidates sessions created by a revoked credential', async () => {
   assert.equal(await auth.getAuthSession(revoked), null)
   assert.equal((await auth.getAuthSession(retained))?.credentialId, 'credential_new')
 })
+
+test('persists email sessions without storing the email as credential material', async () => {
+  const token = await auth.createAuthSession('0xe01', 'email')
+  const session = await auth.getAuthSession(token)
+  assert.equal(session?.method, 'email')
+  assert.equal(session?.credentialId, '')
+})

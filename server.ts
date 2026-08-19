@@ -34,7 +34,7 @@ app.get('/api/health', async (_req, res) => {
   const persistence = persistenceConfig()
   const database = await databaseReadiness()
   const databaseRequired = persistence.accountBackend === 'postgres' || persistence.authBackend === 'postgres'
-  const ready = !databaseRequired || (database.reachable && (database.schemaVersion ?? 0) >= 1)
+  const ready = !databaseRequired || (database.reachable && (database.schemaVersion ?? 0) >= 2)
   res.status(ready ? 200 : 503).json({
     ok: ready,
     service: 'kudirail',

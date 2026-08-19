@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path'
 import { persistenceConfig } from './database'
 import { pgAuthStoreCounts, pgConsumeAuthChallenge, pgCreateAuthSession, pgDeleteAuthSession, pgDeleteAuthSessionsForAddress, pgDeleteAuthSessionsForCredential, pgGetAuthSession, pgSaveAuthChallenge } from './auth-postgres-store'
 
-export type AuthMethod = 'wallet' | 'passkey'
+export type AuthMethod = 'wallet' | 'passkey' | 'email'
 export type AuthSession = {
   address: string
   expiresAt: number
@@ -14,7 +14,7 @@ export type AuthSession = {
 }
 
 export type AuthChallenge = {
-  purpose: 'wallet-signin' | 'passkey-register' | 'passkey-signin' | 'passkey-prf' | 'passkey-revoke' | 'email-verify'
+  purpose: 'wallet-signin' | 'passkey-register' | 'passkey-signin' | 'passkey-prf' | 'passkey-revoke' | 'email-verify' | 'email-signin' | 'email-link'
   challenge: string
   address: string
   targetCredentialId: string

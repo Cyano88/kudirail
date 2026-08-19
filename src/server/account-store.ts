@@ -98,6 +98,12 @@ function cleanText(value: unknown, maximum: number) {
   return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, maximum)
 }
 
+function emailAddress(value: unknown) {
+  const email = cleanText(value, 160).toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error('Enter a valid email address.'), { status: 400 })
+  return email
+}
+
 function walletAddress(value: unknown) {
   const address = cleanText(value, 66).toLowerCase()
   if (!/^0x[0-9a-f]{1,64}$/.test(address)) throw Object.assign(new Error('Enter a valid Starknet wallet address.'), { status: 400 })
@@ -261,6 +267,14 @@ export async function findPasskey(credentialId: string) {
   return null
 }
 
+export async function findVerifiedAccountByEmail(value: unknown) {
+  const email = emailAddress(value)
+  const store = await readStore()
+  const matches = Object.values(store.accounts).filter(account => account.profile?.email === email && Boolean(account.profile.emailVerifiedAt))
+  if (matches.length > 1) throw new Error('Verified email identity is not unique.')
+  return matches[0] ?? null
+}
+
 export async function updatePasskeyCounter(address: string, credentialId: string, counter: number) {
   return mutate(store => {
     const account = accountIn(store, address)
@@ -375,11 +389,30 @@ export async function updateBusinessProfile(address: string, input: any) {
 export async function markBusinessEmailVerified(address: string, email: string) {
   return mutate(store => {
     const account = accountIn(store, address)
-    const candidate = cleanText(email, 160).toLowerCase()
+    const candidate = emailAddress(email)
     if (!candidate || candidate !== account.profile.email) throw Object.assign(new Error('The verification email no longer matches this business profile.'), { status: 409 })
+    if (Object.values(store.accounts).some(other => other.walletAddress !== account.walletAddress && other.profile?.email === candidate && Boolean(other.profile.emailVerifiedAt))) {
+      throw Object.assign(new Error('This email is already linked to another KudiRoll account.'), { status: 409 })
+    }
     account.profile.emailVerifiedAt = new Date().toISOString()
     account.profile.updatedAt = account.profile.emailVerifiedAt
     account.updatedAt = account.profile.emailVerifiedAt
+    return account.profile
+  })
+}
+
+export async function linkVerifiedBusinessEmail(address: string, value: unknown) {
+  return mutate(store => {
+    const account = accountIn(store, address)
+    const email = emailAddress(value)
+    if (Object.values(store.accounts).some(other => other.walletAddress !== account.walletAddress && other.profile?.email === email && Boolean(other.profile.emailVerifiedAt))) {
+      throw Object.assign(new Error('This email is already linked to another KudiRoll account.'), { status: 409 })
+    }
+    const now = new Date().toISOString()
+    account.profile.email = email
+    account.profile.emailVerifiedAt = now
+    account.profile.updatedAt = now
+    account.updatedAt = now
     return account.profile
   })
 }

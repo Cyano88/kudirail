@@ -148,6 +148,15 @@ test('verifies only the saved business email and clears verification after an ad
   assert.equal((await store.getAccount(address)).profile.emailVerifiedAt, '')
 })
 
+test('uses only a unique verified email as an account locator', async () => {
+  const address = '0xe11a2'
+  await store.linkVerifiedBusinessEmail(address, 'LOGIN@EXAMPLE.COM')
+  assert.equal((await store.findVerifiedAccountByEmail('login@example.com'))?.walletAddress, address)
+  await assert.rejects(store.linkVerifiedBusinessEmail('0xe11a3', 'login@example.com'), /already linked/)
+  await store.updateBusinessProfile(address, { ownerName: 'Email Owner', businessName: 'Email Company', email: 'changed@example.com' })
+  assert.equal(await store.findVerifiedAccountByEmail('changed@example.com'), null)
+})
+
 test('persists only public shield evidence and deduplicates a transaction hash', async () => {
   const first = await store.recordTreasuryShield(owner, { transactionHash: '0xabc123', amountUsdc: '1.25' })
   const duplicate = await store.recordTreasuryShield(owner, { transactionHash: '0xABC123', amountUsdc: '9' })
