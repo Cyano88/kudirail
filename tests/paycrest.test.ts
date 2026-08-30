@@ -68,7 +68,7 @@ test('creates only a future Starknet order with an exact USDC amount', async () 
   try {
     const order = await createPhase0PaycrestOrder({
       amountNgn: '1000', institution: '058', accountIdentifier: '0123456789',
-      refundAddress: '0xabc', confirmation: 'CREATE TEST ORDER',
+      refundAddress: '0xabc',
     }, fakeFetch as typeof fetch)
     assert.equal(order.amountUsdc, '0.750001')
     assert.equal(order.receiveAddress, addressB)
@@ -89,7 +89,7 @@ test('rejects a Paycrest provider account on the wrong network', async () => {
     } }), { status: 200 })
   try {
     await assert.rejects(createPhase0PaycrestOrder({
-      amountNgn: '1000', institution: '058', accountIdentifier: '0123456789', refundAddress: addressA, confirmation: 'CREATE TEST ORDER',
+      amountNgn: '1000', institution: '058', accountIdentifier: '0123456789', refundAddress: addressA,
     }, fakeFetch as typeof fetch), /wrong network/)
   } finally {
     restoreEnvironment(previous)

@@ -243,14 +243,12 @@ export type Phase0OrderInput = {
   accountIdentifier: string
   refundAddress: string
   memo?: string
-  confirmation: string
 }
 
 function assertPhase0Order(input: Phase0OrderInput) {
   const configuration = paycrestConfiguration()
   if (!configuration.apiConfigured) throw Object.assign(new Error('Paycrest is not configured.'), { status: 503 })
-  if (!configuration.liveOrdersEnabled) throw Object.assign(new Error('Live Phase 0 order creation is disabled.'), { status: 403 })
-  if (input.confirmation !== 'CREATE TEST ORDER') throw Object.assign(new Error('Type CREATE TEST ORDER to continue.'), { status: 400 })
+  if (!configuration.liveOrdersEnabled) throw Object.assign(new Error('Live Paycrest order creation is disabled.'), { status: 403 })
   const amount = Number(input.amountNgn)
   const maximum = configuration.maximumNgn
   if (!Number.isFinite(amount) || amount <= 0 || amount > maximum) throw Object.assign(new Error(`Test amount must be between NGN 1 and NGN ${maximum}.`), { status: 400 })
@@ -281,7 +279,7 @@ export async function createPhase0PaycrestOrder(input: Phase0OrderInput, fetcher
           institution: input.institution,
           accountIdentifier: input.accountIdentifier,
           accountName,
-          memo: input.memo?.trim() || 'KudiRoll Phase 0',
+          memo: input.memo?.trim() || 'KudiRoll payout',
         },
       },
       reference,
