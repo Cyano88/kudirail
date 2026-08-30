@@ -251,7 +251,7 @@ function assertPhase0Order(input: Phase0OrderInput) {
   if (!configuration.liveOrdersEnabled) throw Object.assign(new Error('Live Paycrest order creation is disabled.'), { status: 403 })
   const amount = Number(input.amountNgn)
   const maximum = configuration.maximumNgn
-  if (!Number.isFinite(amount) || amount <= 0 || amount > maximum) throw Object.assign(new Error(`Test amount must be between NGN 1 and NGN ${maximum}.`), { status: 400 })
+  if (!Number.isFinite(amount) || amount <= 0 || amount > maximum) throw Object.assign(new Error(`Amount must be between NGN 1 and NGN ${maximum}.`), { status: 400 })
   if (!/^[A-Z0-9_-]{3,24}$/i.test(input.institution)) throw Object.assign(new Error('Invalid institution code.'), { status: 400 })
   if (!/^\d{10}$/.test(input.accountIdentifier)) throw Object.assign(new Error('A 10-digit Nigerian account number is required.'), { status: 400 })
   if (!normalizeStarknetAddress(input.refundAddress)) throw Object.assign(new Error('A valid Starknet refund address is required.'), { status: 400 })

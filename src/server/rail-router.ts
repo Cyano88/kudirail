@@ -4,6 +4,7 @@ import { requireRecentSession, requireSessionAddress } from './account-router'
 import { createPayRunExecutionManifest } from './pay-run-manifest'
 import { verifyPayRunFinality } from './pay-run-finality-service'
 import { rateLimit } from './rate-limit'
+import { paycrestConfiguration } from './paycrest'
 
 function statusOf(error: unknown) {
   if (error && typeof error === 'object' && 'status' in error) return Number(error.status) || 500
@@ -36,7 +37,7 @@ export function createRailRouter() {
     custody: 'client',
     authModes: ['first-party-session'],
     externalDeveloperAccess: 'planned',
-    localSettlement: { NGN: 'guided-test', otherAfricanCorridors: 'not-enabled' },
+    localSettlement: { NGN: paycrestConfiguration().liveOrdersEnabled ? 'live-gated' : 'disabled', otherAfricanCorridors: 'not-enabled' },
   }))
 
   router.post('/pay-runs', async (req, res) => {
