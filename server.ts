@@ -6,6 +6,7 @@ import { createRailRouter } from './src/server/rail-router'
 import { databaseReadiness, persistenceConfig } from './src/server/database'
 import { bootstrapAccountStore } from './src/server/account-bootstrap'
 import { createApiOriginPolicy } from './src/server/origin-policy'
+import { paycrestWebhookHandler } from './src/server/paycrest-webhook'
 
 config({ path: '.env.local', quiet: true })
 config({ path: '.env', quiet: true })
@@ -28,6 +29,7 @@ app.use((_req, res, next) => {
   next()
 })
 app.use('/api', createApiOriginPolicy())
+app.post('/api/phase0/paycrest/webhook', express.raw({ type: 'application/json', limit: '128kb' }), paycrestWebhookHandler)
 app.use(express.json({ limit: '32kb' }))
 app.get('/', (_req, res) => res.json({ ok: true, service: 'KudiRail', documentation: 'https://github.com/Cyano88/kudirail' }))
 app.get('/api/health', async (_req, res) => {
