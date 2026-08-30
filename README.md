@@ -6,6 +6,7 @@ KudiRail is non-custodial payroll infrastructure for Starknet. It turns business
 
 ## Documentation
 
+- [Live documentation](https://kudirail-production.up.railway.app) is served at `/` and `/docs`.
 - [Product position](docs/POSITIONING.md)
 - [Architecture and trust boundaries](docs/ARCHITECTURE.md)
 - [API reference](docs/API.md)

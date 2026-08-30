@@ -6,7 +6,7 @@ KudiRail version 1 is currently a first-party, cookie-authenticated API. It is n
 
 ### `GET /`
 
-Returns the service identity and documentation link.
+Serves the public KudiRail documentation webpage. Machine-readable service capability is available from `GET /api/v1`.
 
 ### `GET /api/health`
 
