@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireSessionAddress } from './account-router'
-import { createPhase0PaycrestOrder, listPaycrestInstitutions, listPaycrestOrders, runPublicPaycrestProbe, verifyPaycrestAccount } from './paycrest'
+import { createPhase0PaycrestOrder, listPaycrestInstitutions, listPaycrestOrders, paycrestConfiguration, runPublicPaycrestProbe, verifyPaycrestAccount } from './paycrest'
 
 function statusOf(error: unknown) {
   if (error && typeof error === 'object' && 'status' in error) return Number(error.status) || 500
@@ -18,7 +18,7 @@ export function createPhase0Router() {
     res.setHeader('Cache-Control', 'no-store')
     next()
   })
-  router.get('/health', (_req, res) => res.json({ ok: true, phase: 0, liveOrdersEnabled: process.env.PHASE0_LIVE_ORDER_ENABLED === 'true' }))
+  router.get('/health', (_req, res) => res.json({ ok: true, phase: 0, paycrest: paycrestConfiguration(), liveOrdersEnabled: paycrestConfiguration().liveOrdersEnabled }))
   router.get('/paycrest/public', async (_req, res) => {
     try {
       lastPublicProbe = await runPublicPaycrestProbe()
@@ -45,7 +45,7 @@ export function createPhase0Router() {
   router.get('/paycrest/orders', async (req, res) => {
     try {
       const address = await requireSessionAddress(req)
-      if (!process.env.PAYCREST_API_KEY?.trim()) return res.json({ ok: true, configured: false, orders: [] })
+      if (!paycrestConfiguration().apiConfigured) return res.json({ ok: true, configured: false, orders: [] })
       res.json({ ok: true, configured: true, orders: await listPaycrestOrders(address) })
     } catch (error) {
       res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })

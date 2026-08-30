@@ -29,7 +29,20 @@ function baseUrl() {
 }
 
 async function jsonFetch(fetcher: FetchLike, path: string, init?: RequestInit) {
-  const response = await fetcher(`${baseUrl()}${path}`, init)
+  const configuredTimeout = Number(process.env.PAYCREST_REQUEST_TIMEOUT_MS || 15_000)
+  const timeoutMs = Number.isFinite(configuredTimeout) ? Math.min(Math.max(configuredTimeout, 3_000), 60_000) : 15_000
+  let response: Response
+  try {
+    response = await fetcher(`${baseUrl()}${path}`, {
+      ...init,
+      signal: init?.signal || AbortSignal.timeout(timeoutMs),
+    })
+  } catch (error) {
+    if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+      throw Object.assign(new Error('Paycrest did not respond in time.'), { status: 504 })
+    }
+    throw Object.assign(new Error('Could not reach Paycrest.'), { status: 502, cause: error })
+  }
   const body = await response.json().catch(() => null)
   if (!response.ok) {
     const error = new Error(body?.message || body?.error || `Paycrest returned ${response.status}`)
@@ -50,6 +63,31 @@ function firstText(...values: unknown[]) {
 function decimalText(value: unknown) {
   const text = String(value ?? '').trim()
   return /^\d+(?:\.\d+)?$/.test(text) ? text : ''
+}
+
+function normalizeStarknetAddress(value: unknown) {
+  const text = String(value ?? '').trim().toLowerCase()
+  if (!/^0x[0-9a-f]{1,64}$/.test(text)) return ''
+  const hex = text.slice(2).replace(/^0+/, '') || '0'
+  if (hex === '0') return ''
+  return `0x${hex.padStart(64, '0')}`
+}
+
+function isPaycrestReceiveAddress(value: unknown) {
+  const text = String(value ?? '').trim()
+  return /^0x[0-9a-fA-F]{63,64}$/.test(text) && Boolean(normalizeStarknetAddress(text))
+}
+
+export function paycrestConfiguration() {
+  const apiConfigured = Boolean(process.env.PAYCREST_API_KEY?.trim())
+  const liveOrdersRequested = process.env.PHASE0_LIVE_ORDER_ENABLED === 'true'
+  const maximum = Number(process.env.PHASE0_MAX_NGN || 5000)
+  return {
+    apiConfigured,
+    liveOrdersRequested,
+    liveOrdersEnabled: apiConfigured && liveOrdersRequested,
+    maximumNgn: Number.isFinite(maximum) && maximum > 0 ? maximum : 5000,
+  }
 }
 
 function addDecimalStrings(...values: unknown[]) {
@@ -122,12 +160,12 @@ function sanitizeOrder(row: any): PaycrestOrderSummary | null {
 }
 
 function refundAddressOf(row: any) {
-  return firstText(row?.source?.refundAddress, row?.source?.refund_address, row?.refundAddress, row?.refund_address).toLowerCase()
+  return normalizeStarknetAddress(firstText(row?.source?.refundAddress, row?.source?.refund_address, row?.refundAddress, row?.refund_address))
 }
 
 export async function listPaycrestOrders(refundAddress: string, fetcher: FetchLike = fetch): Promise<PaycrestOrderSummary[]> {
-  const owner = refundAddress.trim().toLowerCase()
-  if (!/^0x[0-9a-f]{1,64}$/.test(owner)) throw Object.assign(new Error('A valid Starknet account is required.'), { status: 400 })
+  const owner = normalizeStarknetAddress(refundAddress)
+  if (!owner) throw Object.assign(new Error('A valid Starknet account is required.'), { status: 400 })
   const data = await jsonFetch(fetcher, '/v2/sender/orders?page=1&pageSize=20', {
     method: 'GET',
     headers: authenticatedHeaders(),
@@ -209,14 +247,16 @@ export type Phase0OrderInput = {
 }
 
 function assertPhase0Order(input: Phase0OrderInput) {
-  if (process.env.PHASE0_LIVE_ORDER_ENABLED !== 'true') throw Object.assign(new Error('Live Phase 0 order creation is disabled.'), { status: 403 })
+  const configuration = paycrestConfiguration()
+  if (!configuration.apiConfigured) throw Object.assign(new Error('Paycrest is not configured.'), { status: 503 })
+  if (!configuration.liveOrdersEnabled) throw Object.assign(new Error('Live Phase 0 order creation is disabled.'), { status: 403 })
   if (input.confirmation !== 'CREATE TEST ORDER') throw Object.assign(new Error('Type CREATE TEST ORDER to continue.'), { status: 400 })
   const amount = Number(input.amountNgn)
-  const maximum = Number(process.env.PHASE0_MAX_NGN || 5000)
+  const maximum = configuration.maximumNgn
   if (!Number.isFinite(amount) || amount <= 0 || amount > maximum) throw Object.assign(new Error(`Test amount must be between NGN 1 and NGN ${maximum}.`), { status: 400 })
   if (!/^[A-Z0-9_-]{3,24}$/i.test(input.institution)) throw Object.assign(new Error('Invalid institution code.'), { status: 400 })
   if (!/^\d{10}$/.test(input.accountIdentifier)) throw Object.assign(new Error('A 10-digit Nigerian account number is required.'), { status: 400 })
-  if (!/^0x[0-9a-fA-F]{1,64}$/.test(input.refundAddress)) throw Object.assign(new Error('A valid Starknet refund address is required.'), { status: 400 })
+  if (!normalizeStarknetAddress(input.refundAddress)) throw Object.assign(new Error('A valid Starknet refund address is required.'), { status: 400 })
 }
 
 export async function createPhase0PaycrestOrder(input: Phase0OrderInput, fetcher: FetchLike = fetch) {
@@ -233,7 +273,7 @@ export async function createPhase0PaycrestOrder(input: Phase0OrderInput, fetcher
     body: JSON.stringify({
       amount: input.amountNgn,
       amountIn: 'fiat',
-      source: { type: 'crypto', currency: 'USDC', network: 'starknet', refundAddress: input.refundAddress },
+      source: { type: 'crypto', currency: 'USDC', network: 'starknet', refundAddress: normalizeStarknetAddress(input.refundAddress) },
       destination: {
         type: 'fiat',
         currency: 'NGN',
@@ -251,18 +291,20 @@ export async function createPhase0PaycrestOrder(input: Phase0OrderInput, fetcher
   const id = firstText(data?.id, data?.orderId, data?.order_id)
   const amountUsdc = payableCryptoAmount(data)
   const receiveAddress = firstText(provider?.receiveAddress, provider?.receive_address)
+  const providerNetwork = firstText(provider?.network).toLowerCase()
   const validUntil = firstText(provider?.validUntil, provider?.valid_until)
   if (!id) throw Object.assign(new Error('Paycrest created no usable order id.'), { status: 502 })
-  if (!decimalText(amountUsdc) || Number(amountUsdc) <= 0) throw Object.assign(new Error('Paycrest returned no exact USDC amount.'), { status: 502 })
-  if (!/^0x[0-9a-fA-F]{1,64}$/.test(receiveAddress)) throw Object.assign(new Error('Paycrest returned no valid Starknet receive address.'), { status: 502 })
-  if (!validUntil || !Number.isFinite(Date.parse(validUntil))) throw Object.assign(new Error('Paycrest returned no valid order expiry.'), { status: 502 })
+  if (!/^\d+(?:\.\d{1,6})?$/.test(amountUsdc) || Number(amountUsdc) <= 0) throw Object.assign(new Error('Paycrest returned no exact six-decimal USDC amount.'), { status: 502 })
+  if (providerNetwork !== 'starknet') throw Object.assign(new Error('Paycrest returned a settlement account for the wrong network.'), { status: 502 })
+  if (!isPaycrestReceiveAddress(receiveAddress)) throw Object.assign(new Error('Paycrest returned no valid Starknet receive address.'), { status: 502 })
+  if (!validUntil || !Number.isFinite(Date.parse(validUntil)) || Date.parse(validUntil) <= Date.now()) throw Object.assign(new Error('Paycrest returned no usable future order expiry.'), { status: 502 })
   return {
     id,
     status: String(data?.status || 'initiated'),
     reference,
     amountNgn: input.amountNgn,
     amountUsdc,
-    receiveAddress,
+    receiveAddress: normalizeStarknetAddress(receiveAddress),
     validUntil,
     accountName,
     bankLast4: input.accountIdentifier.slice(-4),
