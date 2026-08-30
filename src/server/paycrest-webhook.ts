@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { RequestHandler } from 'express'
+import { updateBankPayoutProvider } from './account-store'
 
 function configuredSecret() {
   return process.env.PAYCREST_API_SECRET?.trim() || process.env.PAYCREST_WEBHOOK_SECRET?.trim() || ''
@@ -8,8 +9,8 @@ function configuredSecret() {
 export function verifyPaycrestWebhook(body: Buffer, signature: string, secret = configuredSecret()) {
   const candidate = signature.trim().toLowerCase()
   if (!secret || !/^[0-9a-f]{64}$/.test(candidate)) return false
-  const expected = createHmac('sha256', secret).update(body).digest()
-  const received = Buffer.from(candidate, 'hex')
+  const expected = Buffer.from(createHmac('sha256', secret).update(body).digest('hex'), 'utf8')
+  const received = Buffer.from(candidate, 'utf8')
   return received.length === expected.length && timingSafeEqual(received, expected)
 }
 
@@ -32,4 +33,19 @@ export function createPaycrestWebhookHandler(onEvent: (payload: Record<string, u
   }
 }
 
-export const paycrestWebhookHandler = createPaycrestWebhookHandler()
+export async function persistPaycrestWebhook(payload: Record<string, unknown>) {
+  const data = payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data) ? payload.data as Record<string, unknown> : payload
+  const event = String(payload.event || '')
+  const id = String(data.id || data.orderId || data.order_id || '').trim()
+  if (!id) throw new Error('Paycrest webhook has no order id.')
+  const eventStatus = event.split('.').pop() || ''
+  await updateBankPayoutProvider(id, {
+    status: data.status || eventStatus,
+    amountPaid: data.amountPaid || data.amount_paid,
+    amountReturned: data.amountReturned || data.amount_returned,
+    txHash: data.txHash || data.tx_hash,
+    updatedAt: data.updatedAt || data.updated_at || data.timestamp || payload.timestamp,
+  })
+}
+
+export const paycrestWebhookHandler = createPaycrestWebhookHandler(persistPaycrestWebhook)

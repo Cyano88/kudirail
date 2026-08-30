@@ -63,6 +63,10 @@
           <div class="endpoint"><span class="method">GET</span><code>/api/v1/pay-runs/:id/execution-manifest</code><p>Retrieve the client-signing manifest.</p></div>
           <div class="endpoint"><span class="method post">POST</span><code>/api/v1/pay-runs/:id/verify</code><p>Verify receipt success and STRK20 evidence.</p></div>
           <div class="endpoint"><span class="method post">POST</span><code>/api/v1/pay-runs/:id/resolve-unknown</code><p>Resolve ambiguity with recent passkey assurance.</p></div>
+          <div class="endpoint"><span class="method">GET</span><code>/api/phase0/paycrest/orders</code><p>Read durable bank-payout records and refresh provider and Starknet evidence.</p></div>
+          <div class="endpoint"><span class="method post">POST</span><code>/api/phase0/paycrest/orders/:id/submission</code><p>Record submission intent or the immutable wallet transaction hash.</p></div>
+          <div class="endpoint"><span class="method post">POST</span><code>/api/phase0/paycrest/orders/:id/reconcile</code><p>Compare Paycrest state with the exact Starknet receipt.</p></div>
+          <div class="endpoint"><span class="method">GET</span><code>/api/phase0/paycrest/orders/:id/evidence</code><p>Download a masked incident-support evidence package.</p></div>
         </div>
         <div class="code-block"><button class="copy" type="button" data-copy>Copy</button><code>curl https://kudirail-production.up.railway.app/api/v1
 
@@ -87,6 +91,7 @@
         <table class="status-table"><thead><tr><th>Status</th><th>Stage</th><th>Meaning</th></tr></thead><tbody>
           <tr><td>initiated</td><td>Awaiting deposit</td><td>The order exists; funds are not attributed.</td></tr><tr><td>deposited</td><td>Detected</td><td>The settlement deposit was recognized.</td></tr><tr><td>pending</td><td>Delivering</td><td>Fiat delivery is in progress.</td></tr><tr><td>validated</td><td>Delivered</td><td>The provider confirmed delivery.</td></tr><tr><td>refunding</td><td>Returning</td><td>A detected deposit is being returned.</td></tr><tr><td>refunded</td><td>Returned</td><td>Verify the return transaction before closure.</td></tr><tr><td>expired</td><td>Unattributed</td><td>Paycrest says no deposit was detected before expiry.</td></tr>
         </tbody></table>
+        <div class="incident"><h3>KudiRoll recovery states</h3><ol><li><strong>Payment submitted</strong> means the wallet attempt or transaction hash is durably recorded.</li><li><strong>Awaiting Paycrest detection</strong> means Starknet proves the exact pool-to-order transfer but Paycrest has not attributed it yet.</li><li><strong>Reconciliation required</strong> blocks duplicate payment and prepares provider evidence.</li><li><strong>Refunding, Refunded, and Completed</strong> mirror provider progress while the export keeps provider and chain evidence separate.</li></ol></div>
         <div class="incident"><h3>Successful transfer, expired provider order</h3><ol><li>Verify receipt, block time, token, amount, destination, and STRK20 pool participation.</li><li>Compare provider amount paid, amount returned, hash, update time, and logs.</li><li>Request documented reindexing for the transaction and assigned address.</li><li>If zero paid and returned remain, request manual attribution. Never resend to an expired address.</li></ol></div>
       </section>
 

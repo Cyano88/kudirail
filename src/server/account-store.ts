@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type { TreasuryShieldRecord } from '../treasury-readiness'
+import { blocksAnotherBankPayout, deriveBankPayoutDisplayStatus, type SavedBankPayout } from '../bank-payout'
 import { persistenceConfig } from './database'
 import { pgMutateAccountStore, pgReadAccountStore } from './account-postgres-store'
 
@@ -88,7 +89,7 @@ export type EncryptedWalletBackup = {
   updatedAt: string
 }
 
-export type AccountRecord = { walletAddress: string; profile: BusinessProfile; teams: SavedTeam[]; payRuns: SavedPayRun[]; treasuryShields: TreasuryShieldRecord[]; passkeys: SavedPasskey[]; encryptedWalletBackup: EncryptedWalletBackup | null; createdAt: string; updatedAt: string }
+export type AccountRecord = { walletAddress: string; profile: BusinessProfile; teams: SavedTeam[]; payRuns: SavedPayRun[]; bankPayouts: SavedBankPayout[]; treasuryShields: TreasuryShieldRecord[]; passkeys: SavedPasskey[]; encryptedWalletBackup: EncryptedWalletBackup | null; createdAt: string; updatedAt: string }
 export type StoreFile = { version: 1; accounts: Record<string, AccountRecord> }
 
 const storePath = resolve(process.env.KUDIROLL_DATA_FILE || '.data/kudiroll.json')
@@ -159,10 +160,12 @@ async function mutate<T>(operation: (store: StoreFile) => T | Promise<T>) {
 function accountIn(store: StoreFile, address: string) {
   const key = walletAddress(address)
   const now = new Date().toISOString()
-  const account = store.accounts[key] ?? (store.accounts[key] = { walletAddress: key, profile: emptyProfile(), teams: [], payRuns: [], treasuryShields: [], passkeys: [], encryptedWalletBackup: null, createdAt: now, updatedAt: now })
+  const account = store.accounts[key] ?? (store.accounts[key] = { walletAddress: key, profile: emptyProfile(), teams: [], payRuns: [], bankPayouts: [], treasuryShields: [], passkeys: [], encryptedWalletBackup: null, createdAt: now, updatedAt: now })
   account.profile ??= emptyProfile()
   account.profile.emailVerifiedAt ??= ''
   account.treasuryShields ??= []
+  account.bankPayouts ??= []
+  for (const payout of account.bankPayouts) payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
   account.passkeys ??= []
   for (const passkey of account.passkeys) {
     passkey.prfInput ??= ''
@@ -200,6 +203,7 @@ export function publicAccount(account: AccountRecord) {
     profile: account.profile,
     teams: account.teams,
     payRuns: account.payRuns.map(publicPayRun),
+    bankPayouts: account.bankPayouts,
     treasuryShields: account.treasuryShields,
     passkeys: account.passkeys.map(({ credentialId, deviceType, backedUp, prfCapable, createdAt, lastUsedAt }) => ({ credentialId, deviceType, backedUp, prfCapable, createdAt, lastUsedAt })),
     recoveryReady: account.passkeys.filter(passkey => passkey.prfCapable).length >= 2,
@@ -364,6 +368,144 @@ export async function recordTreasuryShield(address: string, input: any) {
 export async function getAccount(address: string) {
   const store = await readStore()
   return accountIn(store, address)
+}
+
+export async function assertCanCreateBankPayout(address: string) {
+  const account = await getAccount(address)
+  const blocked = account.bankPayouts.find(payout => blocksAnotherBankPayout(payout))
+  if (blocked) throw Object.assign(new Error('Resolve the existing bank payout before creating another order.'), { status: 409, payoutId: blocked.id })
+}
+
+export async function recordBankPayoutOrder(address: string, input: any) {
+  return mutate(store => {
+    const account = accountIn(store, address)
+    const existing = account.bankPayouts.find(item => item.id === cleanText(input?.id, 80))
+    if (existing) return existing
+    const blocked = account.bankPayouts.find(payout => blocksAnotherBankPayout(payout))
+    if (blocked) throw Object.assign(new Error('Resolve the existing bank payout before creating another order.'), { status: 409, payoutId: blocked.id })
+    const now = new Date().toISOString()
+    const payout: SavedBankPayout = {
+      id: cleanText(input?.id, 80), reference: cleanText(input?.reference, 120), providerStatus: cleanText(input?.status, 32).toLowerCase() || 'initiated', displayStatus: 'ready-to-pay',
+      amountNgn: cleanText(input?.amountNgn, 32), amountUsdc: amount(input?.amountUsdc), network: 'starknet', token: 'USDC',
+      receiveAddress: walletAddress(input?.receiveAddress), refundAddress: account.walletAddress,
+      accountName: cleanText(input?.accountName, 100), bankLast4: cleanText(input?.bankLast4, 4).replace(/\D/g, ''), institution: cleanText(input?.institution, 24),
+      validUntil: cleanText(input?.validUntil, 64), transactionHash: '', submissionState: 'not-started', submissionAttemptedAt: '', submittedAt: '',
+      chainStatus: 'not-checked', chainCheckedAt: '', acceptedBlockNumber: null, chainMessage: '', providerAmountPaid: '', providerAmountReturned: '', providerTransactionHash: '',
+      providerUpdatedAt: '', lastProviderSyncAt: '', reconciliationReason: '', createdAt: now, updatedAt: now,
+    }
+    if (!payout.id || !payout.reference || !/^\d{4}$/.test(payout.bankLast4) || !Number.isFinite(Date.parse(payout.validUntil))) throw Object.assign(new Error('Paycrest order evidence is incomplete.'), { status: 502 })
+    payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
+    account.bankPayouts.unshift(payout)
+    account.bankPayouts = account.bankPayouts.slice(0, 50)
+    account.updatedAt = now
+    return payout
+  })
+}
+
+function payoutIn(account: AccountRecord, payoutId: string) {
+  const payout = account.bankPayouts.find(item => item.id === cleanText(payoutId, 80))
+  if (!payout) throw Object.assign(new Error('Bank payout not found.'), { status: 404 })
+  return payout
+}
+
+export async function beginBankPayoutSubmission(address: string, payoutId: string) {
+  return mutate(store => {
+    const account = accountIn(store, address)
+    const payout = payoutIn(account, payoutId)
+    if (payout.transactionHash) return payout
+    if (Date.parse(payout.validUntil) <= Date.now()) throw Object.assign(new Error('This payment window has closed. Create a new order only after this record is resolved.'), { status: 409 })
+    payout.submissionState = 'submitting'
+    payout.submissionAttemptedAt = new Date().toISOString()
+    payout.updatedAt = payout.submissionAttemptedAt
+    payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
+    account.updatedAt = payout.updatedAt
+    return payout
+  })
+}
+
+export async function cancelBankPayoutSubmission(address: string, payoutId: string) {
+  return mutate(store => {
+    const account = accountIn(store, address)
+    const payout = payoutIn(account, payoutId)
+    if (payout.transactionHash) throw Object.assign(new Error('A transaction hash is already recorded; this payment cannot be marked cancelled.'), { status: 409 })
+    payout.submissionState = 'not-started'
+    payout.updatedAt = new Date().toISOString()
+    payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
+    account.updatedAt = payout.updatedAt
+    return payout
+  })
+}
+
+export async function markBankPayoutUnknown(address: string, payoutId: string) {
+  return mutate(store => {
+    const account = accountIn(store, address)
+    const payout = payoutIn(account, payoutId)
+    if (!payout.transactionHash) payout.submissionState = 'unknown'
+    payout.updatedAt = new Date().toISOString()
+    payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
+    account.updatedAt = payout.updatedAt
+    return payout
+  })
+}
+
+export async function recordBankPayoutTransaction(address: string, payoutId: string, input: any) {
+  return mutate(store => {
+    const account = accountIn(store, address)
+    const payout = payoutIn(account, payoutId)
+    const transactionHash = cleanText(input?.transactionHash, 80).toLowerCase()
+    if (!/^0x[0-9a-f]{1,64}$/.test(transactionHash)) throw Object.assign(new Error('A valid Starknet transaction hash is required.'), { status: 400 })
+    if (payout.transactionHash && payout.transactionHash !== transactionHash) throw Object.assign(new Error('This payout already has a different immutable transaction hash.'), { status: 409 })
+    for (const candidate of Object.values(store.accounts)) {
+      if (candidate.bankPayouts?.some(item => item.id !== payout.id && item.transactionHash === transactionHash)) throw Object.assign(new Error('This transaction hash is already attached to another payout.'), { status: 409 })
+    }
+    const now = new Date().toISOString()
+    payout.transactionHash = transactionHash
+    payout.submissionState = 'submitted'
+    payout.submittedAt ||= now
+    payout.updatedAt = now
+    payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
+    account.updatedAt = now
+    return payout
+  })
+}
+
+export async function updateBankPayoutProvider(payoutId: string, input: any) {
+  return mutate(store => {
+    for (const account of Object.values(store.accounts)) {
+      const payout = account.bankPayouts?.find(item => item.id === cleanText(payoutId, 80))
+      if (!payout) continue
+      const now = new Date().toISOString()
+      payout.providerStatus = cleanText(input?.status, 32).toLowerCase() || payout.providerStatus
+      payout.providerAmountPaid = cleanText(input?.amountPaid, 32) || payout.providerAmountPaid
+      payout.providerAmountReturned = cleanText(input?.amountReturned, 32) || payout.providerAmountReturned
+      payout.providerTransactionHash = cleanText(input?.txHash, 80).toLowerCase() || payout.providerTransactionHash
+      payout.providerUpdatedAt = cleanText(input?.updatedAt, 64) || payout.providerUpdatedAt
+      payout.lastProviderSyncAt = now
+      payout.updatedAt = now
+      payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
+      payout.reconciliationReason = payout.displayStatus === 'reconciliation-required' ? 'Starknet finalized the exact payment, but Paycrest has not attributed it to this order.' : ''
+      account.updatedAt = now
+      return payout
+    }
+    return null
+  })
+}
+
+export async function recordBankPayoutChainEvidence(address: string, payoutId: string, input: { status: SavedBankPayout['chainStatus']; acceptedBlockNumber?: number | null; message: string }) {
+  return mutate(store => {
+    const account = accountIn(store, address)
+    const payout = payoutIn(account, payoutId)
+    const now = new Date().toISOString()
+    payout.chainStatus = input.status
+    payout.chainCheckedAt = now
+    payout.acceptedBlockNumber = Number.isSafeInteger(input.acceptedBlockNumber) ? input.acceptedBlockNumber! : null
+    payout.chainMessage = cleanText(input.message, 300)
+    payout.updatedAt = now
+    payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
+    payout.reconciliationReason = payout.displayStatus === 'reconciliation-required' ? 'Starknet finalized the exact payment, but Paycrest has not attributed it to this order.' : ''
+    account.updatedAt = now
+    return payout
+  })
 }
 
 export async function updateBusinessProfile(address: string, input: any) {

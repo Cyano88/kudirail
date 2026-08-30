@@ -22,6 +22,12 @@ export type PaycrestOrderSummary = {
   createdAt: string
   updatedAt: string
   txHash: string
+  amountPaid: string
+  amountReturned: string
+  receiveAddress: string
+  refundAddress: string
+  validUntil: string
+  institution: string
 }
 
 function baseUrl() {
@@ -137,6 +143,7 @@ function orderRows(data: any) {
 function sanitizeOrder(row: any): PaycrestOrderSummary | null {
   const recipient = row?.destination?.recipient ?? row?.recipient ?? {}
   const accountIdentifier = firstText(recipient?.accountIdentifier, recipient?.account_identifier)
+  const provider = row?.providerAccount ?? row?.provider_account ?? {}
   const id = firstText(row?.id, row?.orderId, row?.order_id)
   if (!id) return null
   const explicitFiat = firstText(row?.destination?.amount, row?.fiatAmount, row?.fiat_amount, row?.amountInFiat, row?.amount_in_fiat)
@@ -156,6 +163,12 @@ function sanitizeOrder(row: any): PaycrestOrderSummary | null {
     createdAt: firstText(row?.createdAt, row?.created_at),
     updatedAt: firstText(row?.updatedAt, row?.updated_at),
     txHash: firstText(row?.txHash, row?.tx_hash),
+    amountPaid: decimalText(firstText(row?.amountPaid, row?.amount_paid)),
+    amountReturned: decimalText(firstText(row?.amountReturned, row?.amount_returned)),
+    receiveAddress: normalizeStarknetAddress(firstText(provider?.receiveAddress, provider?.receive_address)),
+    refundAddress: refundAddressOf(row),
+    validUntil: firstText(provider?.validUntil, provider?.valid_until, row?.validUntil, row?.valid_until),
+    institution: firstText(recipient?.institution, recipient?.institutionCode, recipient?.institution_code),
   }
 }
 
@@ -173,6 +186,18 @@ export async function listPaycrestOrders(refundAddress: string, fetcher: FetchLi
   const prefix = process.env.PAYCREST_REFERENCE_PREFIX?.trim() || 'kudiroll-'
   return (orderRows(data).filter(row => refundAddressOf(row) === owner).map(sanitizeOrder).filter(Boolean) as PaycrestOrderSummary[])
     .filter(order => order.reference.startsWith(prefix))
+}
+
+export async function getPaycrestOrder(orderId: string, fetcher: FetchLike = fetch): Promise<PaycrestOrderSummary> {
+  const id = firstText(orderId)
+  if (!/^[A-Za-z0-9_-]{8,100}$/.test(id)) throw Object.assign(new Error('A valid Paycrest order id is required.'), { status: 400 })
+  const data = await jsonFetch(fetcher, `/v2/sender/orders/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    headers: authenticatedHeaders(),
+  })
+  const order = sanitizeOrder(data)
+  if (!order || order.id !== id) throw Object.assign(new Error('Paycrest returned no matching order.'), { status: 502 })
+  return order
 }
 
 export async function listPaycrestInstitutions(fetcher: FetchLike = fetch): Promise<PaycrestInstitution[]> {
