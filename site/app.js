@@ -36,7 +36,6 @@ async function loadStatus() {
     const health = await response.json()
     status.classList.toggle('live', Boolean(response.ok && health.ok))
     status.querySelector('span').textContent = response.ok && health.ok ? 'Mainnet service live' : 'Service needs attention'
-    document.querySelector('[data-release]').textContent = String(health.release || 'unknown').slice(0, 8)
   } catch {
     status.querySelector('span').textContent = 'Status unavailable'
   }
