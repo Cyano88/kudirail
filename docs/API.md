@@ -78,7 +78,11 @@ Requires a recent passkey session and explicit recovery confirmation. This endpo
 
 ## Workspace resources
 
-The authenticated `/api/account` surface manages the business profile, teams, workers, treasury-shield records, pay-run history, passkeys, and optional encrypted wallet-backup ciphertext. These routes remain first-party and can change before the external developer release.
+The authenticated `/api/account` surface manages the business profile, teams, workers, payroll-funding shield records, pay-run history, passkeys, and optional encrypted wallet-backup ciphertext. These routes remain first-party and can change before the external developer release.
+
+### `PUT /api/account/payroll-policy`
+
+Persists the organization payroll controls: `reserveUsdc`, `maxPayRunUsdc`, and `payoutsPaused`. KudiRail rejects new or newly prepared pay runs while payouts are paused and rejects totals above a non-zero maximum. The protected reserve is enforced by the first-party KudiRoll client against the shielded balance the user deliberately exposes through Ready; KudiRail cannot independently read that private balance and does not pretend otherwise.
 
 ## Local settlement
 

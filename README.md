@@ -36,6 +36,6 @@ The local file backend is the safe default. Production requires PostgreSQL schem
 
 ## API status
 
-`GET /api/v1` is the capability declaration. Version 1 currently supports first-party email, wallet and passkey sessions, pay-run creation, manifest retrieval, lifecycle updates, pool-aware finality verification, and guarded unknown-outcome recovery. Third-party credentials, service accounts, SDK stability guarantees, and outbound signed webhooks remain unreleased.
+`GET /api/v1` is the capability declaration. Version 1 currently supports first-party email, wallet and passkey sessions, durable payroll controls, pay-run creation, manifest retrieval, lifecycle updates, pool-aware finality verification, and guarded unknown-outcome recovery. Organization policy can pause new payouts and cap pay-run size server-side; a protected reserve is evaluated by KudiRoll only after the user explicitly shares a shielded balance through Ready. These controls do not create custody or prevent transactions signed outside KudiRoll. Third-party credentials, service accounts, SDK stability guarantees, and outbound signed webhooks remain unreleased.
 
 MIT licensed. See [SECURITY.md](SECURITY.md) before reporting sensitive issues.

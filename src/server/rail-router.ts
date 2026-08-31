@@ -37,6 +37,7 @@ export function createRailRouter() {
     custody: 'client',
     payRunManifestVersion: '2',
     settlementModes: ['public-wallet', 'private'],
+    payrollControls: ['protected-reserve', 'maximum-pay-run', 'payout-pause'],
     authModes: ['first-party-session'],
     externalDeveloperAccess: 'planned',
     localSettlement: { NGN: paycrestConfiguration().liveOrdersEnabled ? 'live-gated' : 'disabled', otherAfricanCorridors: 'not-enabled' },

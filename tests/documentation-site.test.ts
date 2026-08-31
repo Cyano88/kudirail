@@ -10,6 +10,8 @@ test('documentation site exposes the complete public product surface', async () 
   }
   assert.match(html, /Client-controlled execution/)
   assert.match(html, /Never resend to an expired address/)
+  assert.match(html, /Organization payroll controls/)
+  assert.match(html, /\/api\/account\/payroll-policy/)
   assert.match(css, /@media\(max-width:620px\)/)
   assert.match(css, /prefers-reduced-motion/)
 })

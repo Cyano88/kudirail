@@ -144,6 +144,20 @@ test('persists a business profile and deletes only the wallet account record', a
   assert.equal(recreated.teams.length, 0)
 })
 
+test('persists organization payroll controls and enforces pause and maximum pay-run size', async () => {
+  const address = '0x7788'
+  const team = await store.createTeam(address, { name: 'Controlled payroll' })
+  const worker = await store.addWorker(address, team.id, { name: 'Worker One', walletAddress: '0x8899', defaultAmountUsdc: '1' })
+  const policy = await store.updatePayrollPolicy(address, { reserveUsdc: '5', maxPayRunUsdc: '2', payoutsPaused: false })
+  assert.deepEqual({ reserveUsdc: policy.reserveUsdc, maxPayRunUsdc: policy.maxPayRunUsdc, payoutsPaused: policy.payoutsPaused }, { reserveUsdc: '5', maxPayRunUsdc: '2', payoutsPaused: false })
+  await assert.rejects(store.createPayRun(address, { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '2.1' }] }), /organization limit/)
+  const saved = await store.createPayRun(address, { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '2' }] })
+  assert.equal(saved.totalUsdc, '2')
+  await store.updatePayrollPolicy(address, { reserveUsdc: '5', maxPayRunUsdc: '2', payoutsPaused: true })
+  await assert.rejects(store.createPayRun(address, { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '1' }] }), /payouts are paused/)
+  await assert.rejects(store.updatePayRun(address, saved.id, { status: 'prepared' }), /payouts are paused/)
+})
+
 test('verifies only the saved business email and clears verification after an address change', async () => {
   const address = '0xe11a1'
   await assert.rejects(store.markBusinessEmailVerified(address, 'wrong@example.com'), /no longer matches/)

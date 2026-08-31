@@ -21,6 +21,8 @@ KudiRail turns a business instruction such as “pay these workers these amounts
 4. a verified Mainnet result tied to the configured STRK20 pool; and
 5. an auditable application record without server-side signing authority.
 
+KudiRail also persists organization payroll policy. Payout pause and maximum pay-run size are enforced before wallet preparation; KudiRoll applies a protected reserve to the consented Ready balance. This is operational control over a client-controlled wallet, not a separate treasury account or custody product.
+
 ## Accurate claims
 
 KudiRail may be described as private-payroll infrastructure, non-custodial payroll orchestration, or a client-custody payment rail.

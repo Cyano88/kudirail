@@ -3,7 +3,7 @@ import { Router } from 'express'
 import { RpcProvider, constants } from 'starknet'
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server'
 import type { AuthenticationResponseJSON, RegistrationResponseJSON, WebAuthnCredential } from '@simplewebauthn/server'
-import { addWorker, createPayRun, createTeam, deleteAccount, deleteTeam, findPasskey, findVerifiedAccountByEmail, getAccount, getEncryptedWalletBackup, linkVerifiedBusinessEmail, markBusinessEmailVerified, publicAccount, publicPayRun, recordTreasuryShield, removePasskey, removeWorker, resolveUnknownPayRun, saveEncryptedWalletBackup, savePasskey, updateBusinessProfile, updatePasskeyCounter, updatePasskeyPrf, updatePayRun, updateTeam } from './account-store'
+import { addWorker, createPayRun, createTeam, deleteAccount, deleteTeam, findPasskey, findVerifiedAccountByEmail, getAccount, getEncryptedWalletBackup, linkVerifiedBusinessEmail, markBusinessEmailVerified, publicAccount, publicPayRun, recordTreasuryShield, removePasskey, removeWorker, resolveUnknownPayRun, saveEncryptedWalletBackup, savePasskey, updateBusinessProfile, updatePasskeyCounter, updatePasskeyPrf, updatePayRun, updatePayrollPolicy, updateTeam } from './account-store'
 import { consumeAuthChallenge, createAuthSession, deleteAuthSession, deleteAuthSessionsForAddress, deleteAuthSessionsForCredential, getAuthSession, saveAuthChallenge } from './auth-store'
 import { deriveTreasuryReadiness } from '../treasury-readiness'
 import { rateLimit } from './rate-limit'
@@ -563,6 +563,11 @@ export function createAccountRouter(options: { emailFetcher?: typeof fetch } = {
 
   router.patch('/profile', async (req, res) => {
     try { res.json({ ok: true, profile: await updateBusinessProfile(await requireSessionAddress(req), req.body) }) }
+    catch (error) { res.status(statusOf(error)).json({ ok: false, error: messageOf(error) }) }
+  })
+
+  router.put('/payroll-policy', async (req, res) => {
+    try { res.json({ ok: true, payrollPolicy: await updatePayrollPolicy(await requireSessionAddress(req), req.body) }) }
     catch (error) { res.status(statusOf(error)).json({ ok: false, error: messageOf(error) }) }
   })
 
