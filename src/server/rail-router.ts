@@ -35,6 +35,8 @@ export function createRailRouter() {
     apiVersion: '1',
     network: 'starknet-mainnet',
     custody: 'client',
+    payRunManifestVersion: '2',
+    settlementModes: ['public-wallet', 'private'],
     authModes: ['first-party-session'],
     externalDeveloperAccess: 'planned',
     localSettlement: { NGN: paycrestConfiguration().liveOrdersEnabled ? 'live-gated' : 'disabled', otherAfricanCorridors: 'not-enabled' },

@@ -32,7 +32,10 @@ test('authenticated HTTP rail contract creates and replays a private-payroll int
     const port = (server.address() as { port: number }).port
     const capabilities = await fetch(`http://127.0.0.1:${port}/api/v1`)
     assert.equal(capabilities.status, 200)
-    assert.equal((await capabilities.json()).custody, 'client')
+    const capabilityBody = await capabilities.json()
+    assert.equal(capabilityBody.custody, 'client')
+    assert.equal(capabilityBody.payRunManifestVersion, '2')
+    assert.deepEqual(capabilityBody.settlementModes, ['public-wallet', 'private'])
     const request = { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '1.75' }] }
     const send = () => fetch(`http://127.0.0.1:${port}/api/v1/pay-runs`, {
       method: 'POST',

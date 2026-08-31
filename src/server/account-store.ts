@@ -34,11 +34,13 @@ export type SavedPayRunItem = {
 }
 
 export type PayRunStatus = 'draft' | 'prepared' | 'submitting' | 'submitted' | 'finalized' | 'reverted' | 'unknown' | 'failed'
+export type PayRunSettlementMode = 'public-wallet' | 'private'
 
 export type SavedPayRun = {
   id: string
   teamId: string
   teamName: string
+  settlementMode: PayRunSettlementMode
   status: PayRunStatus
   totalUsdc: string
   items: SavedPayRunItem[]
@@ -173,6 +175,7 @@ function accountIn(store: StoreFile, address: string) {
   }
   account.encryptedWalletBackup ??= null
   for (const payRun of account.payRuns) {
+    payRun.settlementMode ??= 'private'
     payRun.submissionAttemptedAt ??= ''
     payRun.finalityCheckedAt ??= ''
     payRun.acceptedBlockNumber ??= null
@@ -647,8 +650,9 @@ export async function createPayRun(address: string, input: any, idempotencyKey =
     const account = accountIn(store, address)
     const teamId = cleanText(input?.teamId, 64)
     const clientReference = cleanText(input?.clientReference, 100)
+    const settlementMode: PayRunSettlementMode = input?.settlementMode === 'private' ? 'private' : 'public-wallet'
     const requested = Array.isArray(input?.items) ? input.items : []
-    const normalizedRequest = { teamId, clientReference, items: requested.map((item: any) => ({ workerId: cleanText(item?.workerId, 64), amountUsdc: cleanText(item?.amountUsdc, 32) })) }
+    const normalizedRequest = { teamId, clientReference, settlementMode, items: requested.map((item: any) => ({ workerId: cleanText(item?.workerId, 64), amountUsdc: cleanText(item?.amountUsdc, 32) })) }
     const requestHash = createHash('sha256').update(JSON.stringify(normalizedRequest)).digest('hex')
     const normalizedIdempotencyKey = cleanText(idempotencyKey, 128)
     const idempotencyKeyHash = normalizedIdempotencyKey ? createHash('sha256').update(normalizedIdempotencyKey).digest('hex') : ''
@@ -672,7 +676,7 @@ export async function createPayRun(address: string, input: any, idempotencyKey =
     })
     const total = items.reduce((sum: bigint, item: SavedPayRunItem) => sum + amountUnits(item.amountUsdc), 0n)
     const now = new Date().toISOString()
-    const payRun: SavedPayRun = { id: randomUUID(), teamId: team.id, teamName: team.name, status: 'draft', totalUsdc: `${total / 1_000_000n}.${(total % 1_000_000n).toString().padStart(6, '0')}`.replace(/\.?0+$/, ''), items, transactionHash: '', submissionAttemptedAt: '', finalityCheckedAt: '', acceptedBlockNumber: null, finalityMessage: '', clientReference, idempotencyKeyHash, requestHash, createdAt: now, updatedAt: now }
+    const payRun: SavedPayRun = { id: randomUUID(), teamId: team.id, teamName: team.name, settlementMode, status: 'draft', totalUsdc: `${total / 1_000_000n}.${(total % 1_000_000n).toString().padStart(6, '0')}`.replace(/\.?0+$/, ''), items, transactionHash: '', submissionAttemptedAt: '', finalityCheckedAt: '', acceptedBlockNumber: null, finalityMessage: '', clientReference, idempotencyKeyHash, requestHash, createdAt: now, updatedAt: now }
     account.payRuns.unshift(payRun)
     account.updatedAt = now
     return payRun

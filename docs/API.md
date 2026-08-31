@@ -49,9 +49,10 @@ The manifest states:
 
 ```json
 {
-  "version": "1",
-  "kind": "strk20.private-payroll-intent",
+  "version": "2",
+  "kind": "strk20.payroll-intent",
   "network": "starknet-mainnet",
+  "settlementMode": "public-wallet",
   "asset": { "symbol": "USDC", "decimals": 6 },
   "signing": {
     "authority": "client",
@@ -61,7 +62,7 @@ The manifest states:
 }
 ```
 
-The full manifest includes ordered private-transfer actions, the total, identifiers, and a snapshot hash. It is an application intent—not a signature, proof, wallet authorization, or promise of settlement.
+The full manifest includes ordered actions, the total, identifiers, and a snapshot hash. `public-wallet` uses STRK20 withdrawals so recipients need no setup, but recipient addresses and amounts are public; `private` uses private transfers and requires registered recipients. The manifest is an application intent—not a signature, proof, wallet authorization, or promise of settlement.
 
 ### `PATCH /api/v1/pay-runs/:payRunId`
 

@@ -55,7 +55,7 @@ test('replays identical pay-run creation idempotently and rejects payload drift'
   assert.equal('requestHash' in store.publicPayRun(first), false)
 })
 
-test('builds a deterministic non-custodial execution manifest without worker names', async () => {
+test('builds deterministic public-wallet and private manifests without worker names', async () => {
   const { createPayRunExecutionManifest } = await import('../src/server/pay-run-manifest')
   const address = '0x2de'
   const team = await store.createTeam(address, { name: 'Manifest team' })
@@ -66,8 +66,13 @@ test('builds a deterministic non-custodial execution manifest without worker nam
   assert.equal(first.snapshotHash, second.snapshotHash)
   assert.equal(first.signing.authority, 'client')
   assert.equal(first.signing.serverCanSubmit, false)
-  assert.deepEqual(first.actions, [{ kind: 'private-transfer', workerId: worker.id, recipient: '0x2df', amountUsdc: '2.5' }])
+  assert.equal(first.settlementMode, 'public-wallet')
+  assert.deepEqual(first.actions, [{ kind: 'public-withdrawal', workerId: worker.id, recipient: '0x2df', amountUsdc: '2.5' }])
   assert.equal(JSON.stringify(first).includes('Private Name'), false)
+  const privateRun = await store.createPayRun(address, { teamId: team.id, settlementMode: 'private', items: [{ workerId: worker.id, amountUsdc: '1' }] })
+  const privateManifest = createPayRunExecutionManifest(privateRun)
+  assert.equal(privateManifest.settlementMode, 'private')
+  assert.equal(privateManifest.actions[0].kind, 'private-transfer')
 })
 
 test('enforces pay-run preparation before submission and locks submitted records', async () => {
