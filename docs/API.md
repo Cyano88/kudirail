@@ -54,6 +54,12 @@ The manifest states:
   "network": "starknet-mainnet",
   "settlementMode": "public-wallet",
   "asset": { "symbol": "USDC", "decimals": 6 },
+  "policy": {
+    "version": 3,
+    "reserveUsdc": "0.1",
+    "maxPayRunUsdc": "5",
+    "payoutsPaused": false
+  },
   "signing": {
     "authority": "client",
     "requiresUserApproval": true,
@@ -66,7 +72,7 @@ The full manifest includes ordered actions, the total, identifiers, and a snapsh
 
 ### `PATCH /api/v1/pay-runs/:payRunId`
 
-Records guarded lifecycle transitions and public transaction evidence. Invalid state jumps and reused transaction hashes are rejected.
+Records guarded lifecycle transitions and public transaction evidence. Moving to `submitting` requires the policy version reviewed by the client; KudiRail rejects the transition if controls changed and returns a freshly authorized manifest after every accepted update. Invalid state jumps and reused transaction hashes are rejected.
 
 ### `POST /api/v1/pay-runs/:payRunId/verify`
 
@@ -82,7 +88,9 @@ The authenticated `/api/account` surface manages the business profile, teams, wo
 
 ### `PUT /api/account/payroll-policy`
 
-Persists the organization payroll controls: `reserveUsdc`, `maxPayRunUsdc`, and `payoutsPaused`. KudiRail rejects new or newly prepared pay runs while payouts are paused and rejects totals above a non-zero maximum. The protected reserve is enforced by the first-party KudiRoll client against the shielded balance the user deliberately exposes through Ready; KudiRail cannot independently read that private balance and does not pretend otherwise.
+Persists a monotonically versioned organization policy containing `reserveUsdc`, `maxPayRunUsdc`, and `payoutsPaused`. KudiRail rejects new or newly prepared pay runs while payouts are paused, rejects totals above a non-zero maximum, and rejects wallet submission when the reviewed policy version is stale. The protected reserve is enforced by KudiRoll after a fresh wallet-mediated balance read immediately before submission; KudiRail cannot independently read that private balance and does not pretend otherwise.
+
+Policy changes, payroll lifecycle transitions, transaction-hash capture, finality results, and recorded shields are appended to an encrypted per-account hash chain. `GET /api/account/me` returns the latest 100 audit events plus `treasuryAuditVerified`; mutations fail closed if the stored chain no longer verifies.
 
 ## Local settlement
 

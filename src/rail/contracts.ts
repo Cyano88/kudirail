@@ -9,6 +9,8 @@ export type PayRunExecutionManifest = {
   actions: { kind: 'public-withdrawal' | 'private-transfer'; workerId: string; recipient: string; amountUsdc: string }[]
   totalUsdc: string
   snapshotHash: string
+  policy: { version: number; reserveUsdc: string; maxPayRunUsdc: string; payoutsPaused: boolean; authorizedAt: string }
+  authorizationHash: string
   signing: { authority: 'client'; requiresUserApproval: true; serverCanSubmit: false }
 }
 

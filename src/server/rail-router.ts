@@ -37,7 +37,7 @@ export function createRailRouter() {
     custody: 'client',
     payRunManifestVersion: '2',
     settlementModes: ['public-wallet', 'private'],
-    payrollControls: ['protected-reserve', 'maximum-pay-run', 'payout-pause'],
+    payrollControls: ['protected-reserve', 'maximum-pay-run', 'payout-pause', 'version-bound-authorization', 'tamper-evident-audit'],
     authModes: ['first-party-session'],
     externalDeveloperAccess: 'planned',
     localSettlement: { NGN: paycrestConfiguration().liveOrdersEnabled ? 'live-gated' : 'disabled', otherAfricanCorridors: 'not-enabled' },
@@ -67,7 +67,7 @@ export function createRailRouter() {
   router.patch('/pay-runs/:payRunId', async (req, res) => {
     try {
       const payRun = await updatePayRun(await requireSessionAddress(req), req.params.payRunId, req.body)
-      res.json({ ok: true, payRun: publicPayRun(payRun) })
+      res.json({ ok: true, payRun: publicPayRun(payRun), executionManifest: createPayRunExecutionManifest(payRun) })
     } catch (error) {
       res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })
     }

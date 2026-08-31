@@ -17,7 +17,7 @@ async function submittedRun(address: string, suffix: string) {
   const worker = await store.addWorker(address, team.id, { name: `Worker ${suffix}`, walletAddress: `0x${suffix}1`, defaultAmountUsdc: '1' })
   const run = await store.createPayRun(address, { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '1' }] })
   await store.updatePayRun(address, run.id, { status: 'prepared' })
-  await store.updatePayRun(address, run.id, { status: 'submitting' })
+  await store.updatePayRun(address, run.id, { status: 'submitting', expectedPolicyVersion: 0 })
   return store.updatePayRun(address, run.id, { status: 'submitted', transactionHash: `0x${suffix}2` })
 }
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -84,7 +84,7 @@ test('enforces pay-run preparation before submission and locks submitted records
     /cannot move directly/,
   )
   await store.updatePayRun(owner, run.id, { status: 'prepared' })
-  await store.updatePayRun(owner, run.id, { status: 'submitting' })
+  await store.updatePayRun(owner, run.id, { status: 'submitting', expectedPolicyVersion: 0 })
   const submitted = await store.updatePayRun(owner, run.id, { status: 'submitted', transactionHash: '0x123' })
   assert.equal(submitted.status, 'submitted')
   const finalized = await store.recordPayRunFinality(owner, run.id, { status: 'finalized', acceptedBlockNumber: 1234, message: 'Verified pool receipt.' })
@@ -100,14 +100,14 @@ test('keeps unknown wallet outcomes recoverable while preventing reused transact
   const first = await store.createPayRun(owner, { teamId: team.id, items: [{ workerId: firstWorker.id, amountUsdc: '1' }] })
   const second = await store.createPayRun(owner, { teamId: team.id, items: [{ workerId: secondWorker.id, amountUsdc: '1' }] })
   await store.updatePayRun(owner, first.id, { status: 'prepared' })
-  await store.updatePayRun(owner, first.id, { status: 'submitting' })
+  await store.updatePayRun(owner, first.id, { status: 'submitting', expectedPolicyVersion: 0 })
   await store.updatePayRun(owner, first.id, { status: 'unknown' })
   assert.equal((await store.updatePayRun(owner, first.id, { status: 'submitted', transactionHash: '0x456' })).status, 'submitted')
   await store.recordPayRunFinality(owner, first.id, { status: 'unknown', message: 'Receipt is not final yet.' })
   assert.equal((await store.updatePayRun(owner, first.id, { status: 'unknown', transactionHash: '0x456' })).transactionHash, '0x456')
   await assert.rejects(store.updatePayRun(owner, first.id, { status: 'submitted', transactionHash: '0x457' }), /cannot change its recovered transaction hash/)
   await store.updatePayRun(owner, second.id, { status: 'prepared' })
-  await store.updatePayRun(owner, second.id, { status: 'submitting' })
+  await store.updatePayRun(owner, second.id, { status: 'submitting', expectedPolicyVersion: 0 })
   await assert.rejects(store.updatePayRun(owner, second.id, { status: 'submitted', transactionHash: '0x456' }), /already attached/)
   await store.updatePayRun(owner, second.id, { status: 'failed' })
 })
@@ -118,7 +118,7 @@ test('blocks new payroll while an outcome is unknown and requires explicit recov
   const worker = await store.addWorker(address, team.id, { name: 'Recovery Worker', walletAddress: '0x6161', defaultAmountUsdc: '1' })
   const run = await store.createPayRun(address, { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '1' }] })
   await store.updatePayRun(address, run.id, { status: 'prepared' })
-  await store.updatePayRun(address, run.id, { status: 'submitting' })
+  await store.updatePayRun(address, run.id, { status: 'submitting', expectedPolicyVersion: 0 })
   await store.updatePayRun(address, run.id, { status: 'unknown' })
   await assert.rejects(store.createPayRun(address, { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '1' }] }), /Resolve the existing unknown/)
   await assert.rejects(store.resolveUnknownPayRun(address, run.id, 'NO'), /NO TRANSACTION IN READY/)
@@ -149,6 +149,7 @@ test('persists organization payroll controls and enforces pause and maximum pay-
   const team = await store.createTeam(address, { name: 'Controlled payroll' })
   const worker = await store.addWorker(address, team.id, { name: 'Worker One', walletAddress: '0x8899', defaultAmountUsdc: '1' })
   const policy = await store.updatePayrollPolicy(address, { reserveUsdc: '5', maxPayRunUsdc: '2', payoutsPaused: false })
+  assert.equal(policy.version, 1)
   assert.deepEqual({ reserveUsdc: policy.reserveUsdc, maxPayRunUsdc: policy.maxPayRunUsdc, payoutsPaused: policy.payoutsPaused }, { reserveUsdc: '5', maxPayRunUsdc: '2', payoutsPaused: false })
   await assert.rejects(store.createPayRun(address, { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '2.1' }] }), /organization limit/)
   const saved = await store.createPayRun(address, { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '2' }] })
@@ -156,6 +157,30 @@ test('persists organization payroll controls and enforces pause and maximum pay-
   await store.updatePayrollPolicy(address, { reserveUsdc: '5', maxPayRunUsdc: '2', payoutsPaused: true })
   await assert.rejects(store.createPayRun(address, { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '1' }] }), /payouts are paused/)
   await assert.rejects(store.updatePayRun(address, saved.id, { status: 'prepared' }), /payouts are paused/)
+})
+
+test('binds wallet submission to the reviewed policy version and records a hash-chained audit trail', async () => {
+  const address = '0x7799'
+  const team = await store.createTeam(address, { name: 'Versioned controls' })
+  const worker = await store.addWorker(address, team.id, { name: 'Worker Two', walletAddress: '0x8800', defaultAmountUsdc: '1' })
+  await store.updatePayrollPolicy(address, { reserveUsdc: '1', maxPayRunUsdc: '5', payoutsPaused: false })
+  const run = await store.createPayRun(address, { teamId: team.id, items: [{ workerId: worker.id, amountUsdc: '1' }] })
+  const prepared = await store.updatePayRun(address, run.id, { status: 'prepared' })
+  assert.equal(prepared.policySnapshot.version, 1)
+  await store.updatePayrollPolicy(address, { reserveUsdc: '2', maxPayRunUsdc: '5', payoutsPaused: false })
+  await assert.rejects(store.updatePayRun(address, run.id, { status: 'submitting', expectedPolicyVersion: 1 }), /controls changed/)
+  const refreshed = await store.updatePayRun(address, run.id, { status: 'prepared' })
+  assert.equal(refreshed.policySnapshot.version, 2)
+  await store.updatePayRun(address, run.id, { status: 'submitting', expectedPolicyVersion: 2 })
+  const audit = (await store.getAccount(address)).treasuryAudit
+  assert.ok(audit.length >= 5)
+  assert.equal(store.verifyTreasuryAuditChain(audit), true)
+  for (let index = 0; index < audit.length; index += 1) {
+    assert.equal(audit[index].previousHash, index ? audit[index - 1].eventHash : '')
+    const { eventHash, ...event } = audit[index]
+    assert.equal(eventHash, createHash('sha256').update(JSON.stringify(event)).digest('hex'))
+  }
+  assert.equal(store.verifyTreasuryAuditChain(audit.map((event, index) => index === 1 ? { ...event, summary: 'modified' } : event)), false)
 })
 
 test('verifies only the saved business email and clears verification after an address change', async () => {
