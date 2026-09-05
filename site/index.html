@@ -63,6 +63,7 @@
           <div class="endpoint"><span class="method post">PUT</span><code>/api/account/payroll-policy</code><p>Version protected reserve, maximum pay-run, and payout-pause controls.</p></div>
           <div class="endpoint"><span class="method post">POST</span><code>/api/v1/pay-runs</code><p>Create or replay an immutable payroll intent.</p></div>
           <div class="endpoint"><span class="method">GET</span><code>/api/v1/pay-runs/:id/execution-manifest</code><p>Retrieve the client-signing manifest.</p></div>
+          <div class="endpoint"><span class="method">GET</span><code>/api/v1/pay-runs/:id/evidence</code><p>Download sanitized intent, finality, and audit evidence without payroll identities or amounts.</p></div>
           <div class="endpoint"><span class="method post">POST</span><code>/api/v1/pay-runs/:id/verify</code><p>Verify receipt success and STRK20 evidence.</p></div>
           <div class="endpoint"><span class="method post">POST</span><code>/api/v1/pay-runs/:id/resolve-unknown</code><p>Resolve ambiguity with recent passkey assurance.</p></div>
           <div class="endpoint"><span class="method">GET</span><code>/api/phase0/paycrest/orders</code><p>Read durable bank-payout records and refresh provider and Starknet evidence.</p></div>

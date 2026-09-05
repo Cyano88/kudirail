@@ -70,6 +70,12 @@ The manifest states:
 
 The full manifest includes ordered actions, the total, identifiers, and a snapshot hash. `public-wallet` uses STRK20 withdrawals so recipients need no setup, but recipient addresses and amounts are public; `private` uses private transfers and requires registered recipients. The manifest is an application intent—not a signature, proof, wallet authorization, or promise of settlement.
 
+### `GET /api/v1/pay-runs/:payRunId/evidence`
+
+Downloads a sanitized, shareable evidence bundle. It includes the committed intent hashes, client-signing boundary, saved transaction and finality evidence, and the relevant tamper-evident audit records. It excludes team names, worker names, recipient addresses, individual amounts, and the pay-run total.
+
+For a private route, the bundle distinguishes two facts: KudiRail recorded an intent for STRK20 private transfers, and Starknet can verify finality plus interaction with the configured pool. A public receipt intentionally cannot reveal or independently prove private recipients, amounts, or note delivery; recipient-wallet confirmation is required for end-to-end delivery evidence. The bundle checksum detects file changes but is not a signature or onchain attestation.
+
 ### `PATCH /api/v1/pay-runs/:payRunId`
 
 Records guarded lifecycle transitions and public transaction evidence. Moving to `submitting` requires the policy version reviewed by the client; KudiRail rejects the transition if controls changed and returns a freshly authorized manifest after every accepted update. Invalid state jumps and reused transaction hashes are rejected.
@@ -97,3 +103,6 @@ Policy changes, payroll lifecycle transitions, transaction-hash capture, finalit
 The `/api/phase0/paycrest` routes expose public provider health plus authenticated institution, recipient verification, order creation, and order history. Live order creation remains protected by server credentials, a deployment gate, and an NGN amount cap.
 
 Paycrest status is provider evidence. `initiated` or `expired` does not prove a refund, and KudiRail must not present fiat delivery before Paycrest reaches a documented successful state.
+
+
+Payroll evidence records `verifiedPoolAddress` from the successful accepted receipt check separately from the current configured pool. Historical finalized records without this field require another Verify onchain check; descriptive text alone cannot establish pool verification. Pre-confirmed receipts do not finalize a pay run. The export is available through the KudiRoll proxy with its attachment header intact.

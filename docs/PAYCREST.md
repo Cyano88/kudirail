@@ -55,3 +55,11 @@ Provide Paycrest with:
 - results of transaction and address reindex requests.
 
 Mask the bank account and do not send KudiRail credentials or wallet secrets.
+
+
+## Payment timing evidence
+
+The authenticated incident export includes `acceptedBlockTimestamp` and `paidBeforeExpiry`. Timing is compared with `validUntil` only after the exact USDC transfer from the configured pool to the order address is proved. A reverted or unmatched receipt, or unavailable/invalid block timestamp, yields unknown timing (`null`). A proved payment after expiry yields `false`; at or before expiry yields `true`. None of these values certifies bank settlement.
+
+
+A receipt must be successful and accepted on L1 or L2 with a block number before payment is proved. The block timestamp must come from the same block number. A later temporary receipt outage retains prior evidence; a successful recheck of the same block retains its known timestamp if the block lookup is unavailable. No inferred timestamp is substituted.

@@ -26,10 +26,11 @@ test('finality service verifies a successful receipt only when the configured po
   const run = await submittedRun(address, 'a1')
   const result = await verifyPayRunFinality(address, run.id, {
     poolAddress: '0xabc',
-    provider: { getTransactionReceipt: async () => ({ value: { block_number: 77, events: [{ from_address: '0x0abc' }] }, isError: () => false, isReverted: () => false }) },
+    provider: { getTransactionReceipt: async () => ({ value: { execution_status: 'SUCCEEDED', finality_status: 'ACCEPTED_ON_L2', block_number: 77, events: [{ from_address: '0x0abc' }] }, isError: () => false, isReverted: () => false }) },
   })
   assert.equal(result.payRun?.status, 'finalized')
   assert.equal(result.payRun?.acceptedBlockNumber, 77)
+  assert.equal((await store.getAccount(address)).payRuns[0].verifiedPoolAddress, '0xabc')
 })
 
 test('finality service keeps an unavailable transaction pending without mutating the pay run', async () => {
@@ -38,6 +39,18 @@ test('finality service keeps an unavailable transaction pending without mutating
   const result = await verifyPayRunFinality(address, run.id, {
     poolAddress: '0xabc',
     provider: { getTransactionReceipt: async () => { throw new Error('Transaction hash not found code 29') } },
+  })
+  assert.equal(result.pending, true)
+  assert.equal((await store.getAccount(address)).payRuns[0].status, 'submitted')
+})
+
+
+test('pool events in an unaccepted receipt do not finalize payroll', async () => {
+  const address = '0xfa3'
+  const run = await submittedRun(address, 'c1')
+  const result = await verifyPayRunFinality(address, run.id, {
+    poolAddress: '0xabc',
+    provider: { getTransactionReceipt: async () => ({ value: { execution_status: 'SUCCEEDED', finality_status: 'PRE_CONFIRMED', events: [{ from_address: '0xabc' }] }, isError: () => false, isReverted: () => false }) },
   })
   assert.equal(result.pending, true)
   assert.equal((await store.getAccount(address)).payRuns[0].status, 'submitted')

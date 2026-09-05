@@ -127,7 +127,7 @@ export function createPhase0Router() {
         status: { product: payout.displayStatus, paycrest: payout.providerStatus, chain: payout.chainStatus, submission: payout.submissionState },
         payment: { amountUsdc: payout.amountUsdc, amountNgn: payout.amountNgn, network: payout.network, token: payout.token, receiveAddress: payout.receiveAddress, refundAddress: payout.refundAddress },
         recipient: { accountName: payout.accountName, bankLast4: payout.bankLast4, institution: payout.institution },
-        transaction: { hash: payout.transactionHash, submittedAt: payout.submittedAt, acceptedBlockNumber: payout.acceptedBlockNumber, chainCheckedAt: payout.chainCheckedAt, evidence: payout.chainMessage },
+        transaction: { hash: payout.transactionHash, submittedAt: payout.submittedAt, acceptedBlockNumber: payout.acceptedBlockNumber, acceptedBlockTimestamp: payout.acceptedBlockTimestamp, paidBeforeExpiry: payout.paidBeforeExpiry, chainCheckedAt: payout.chainCheckedAt, evidence: payout.chainMessage },
         provider: { amountPaid: payout.providerAmountPaid, amountReturned: payout.providerAmountReturned, transactionHash: payout.providerTransactionHash, updatedAt: payout.providerUpdatedAt, lastSyncAt: payout.lastProviderSyncAt },
         timing: { orderCreatedAt: payout.createdAt, validUntil: payout.validUntil, lastUpdatedAt: payout.updatedAt }, reconciliationReason: payout.reconciliationReason,
       }

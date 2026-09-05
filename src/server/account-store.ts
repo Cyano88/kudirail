@@ -49,6 +49,7 @@ export type SavedPayRun = {
   finalityCheckedAt: string
   acceptedBlockNumber: number | null
   finalityMessage: string
+  verifiedPoolAddress?: string
   clientReference: string
   idempotencyKeyHash: string
   requestHash: string
@@ -225,7 +226,11 @@ function accountIn(store: StoreFile, address: string) {
   account.treasuryShields ??= []
   account.treasuryAudit ??= []
   account.bankPayouts ??= []
-  for (const payout of account.bankPayouts) payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
+  for (const payout of account.bankPayouts) {
+    payout.acceptedBlockTimestamp ??= ''
+    payout.paidBeforeExpiry ??= null
+    payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
+  }
   account.passkeys ??= []
   for (const passkey of account.passkeys) {
     passkey.prfInput ??= ''
@@ -238,6 +243,7 @@ function accountIn(store: StoreFile, address: string) {
     payRun.finalityCheckedAt ??= ''
     payRun.acceptedBlockNumber ??= null
     payRun.finalityMessage ??= ''
+    payRun.verifiedPoolAddress ??= ''
     payRun.clientReference ??= ''
     payRun.idempotencyKeyHash ??= ''
     payRun.requestHash ??= ''
@@ -457,7 +463,7 @@ export async function recordBankPayoutOrder(address: string, input: any) {
       receiveAddress: walletAddress(input?.receiveAddress), refundAddress: account.walletAddress,
       accountName: cleanText(input?.accountName, 100), bankLast4: cleanText(input?.bankLast4, 4).replace(/\D/g, ''), institution: cleanText(input?.institution, 24),
       validUntil: cleanText(input?.validUntil, 64), transactionHash: '', submissionState: 'not-started', submissionAttemptedAt: '', submittedAt: '',
-      chainStatus: 'not-checked', chainCheckedAt: '', acceptedBlockNumber: null, chainMessage: '', providerAmountPaid: '', providerAmountReturned: '', providerTransactionHash: '',
+      chainStatus: 'not-checked', chainCheckedAt: '', acceptedBlockNumber: null, acceptedBlockTimestamp: '', paidBeforeExpiry: null, chainMessage: '', providerAmountPaid: '', providerAmountReturned: '', providerTransactionHash: '',
       providerUpdatedAt: '', lastProviderSyncAt: '', reconciliationReason: '', createdAt: now, updatedAt: now,
     }
     if (!payout.id || !payout.reference || !/^\d{4}$/.test(payout.bankLast4) || !Number.isFinite(Date.parse(payout.validUntil))) throw Object.assign(new Error('Paycrest order evidence is incomplete.'), { status: 502 })
@@ -558,14 +564,21 @@ export async function updateBankPayoutProvider(payoutId: string, input: any) {
   })
 }
 
-export async function recordBankPayoutChainEvidence(address: string, payoutId: string, input: { status: SavedBankPayout['chainStatus']; acceptedBlockNumber?: number | null; message: string }) {
+export async function recordBankPayoutChainEvidence(address: string, payoutId: string, input: { status: SavedBankPayout['chainStatus']; acceptedBlockNumber?: number | null; acceptedBlockTimestamp?: string; message: string }) {
   return mutate(store => {
     const account = accountIn(store, address)
     const payout = payoutIn(account, payoutId)
     const now = new Date().toISOString()
+    const retainedTimestamp = input.status === 'succeeded' && payout.chainStatus === 'succeeded' && input.acceptedBlockNumber === payout.acceptedBlockNumber ? payout.acceptedBlockTimestamp : ''
     payout.chainStatus = input.status
     payout.chainCheckedAt = now
     payout.acceptedBlockNumber = Number.isSafeInteger(input.acceptedBlockNumber) ? input.acceptedBlockNumber! : null
+    const acceptedBlockTimestamp = cleanText(input.acceptedBlockTimestamp, 64) || retainedTimestamp
+    if (acceptedBlockTimestamp && !Number.isFinite(Date.parse(acceptedBlockTimestamp))) throw Object.assign(new Error('Invalid accepted block timestamp.'), { status: 400 })
+    payout.acceptedBlockTimestamp = acceptedBlockTimestamp
+    payout.paidBeforeExpiry = input.status === 'succeeded' && acceptedBlockTimestamp
+      ? Date.parse(acceptedBlockTimestamp) <= Date.parse(payout.validUntil)
+      : null
     payout.chainMessage = cleanText(input.message, 300)
     payout.updatedAt = now
     payout.displayStatus = deriveBankPayoutDisplayStatus(payout)
@@ -817,7 +830,7 @@ export async function updatePayRun(address: string, payRunId: string, input: any
   })
 }
 
-export async function recordPayRunFinality(address: string, payRunId: string, input: { status: 'finalized' | 'reverted' | 'unknown'; acceptedBlockNumber?: number; message: string }) {
+export async function recordPayRunFinality(address: string, payRunId: string, input: { status: 'finalized' | 'reverted' | 'unknown'; acceptedBlockNumber?: number; verifiedPoolAddress?: string; message: string }) {
   return mutate(store => {
     const account = accountIn(store, address)
     const payRun = account.payRuns.find(item => item.id === payRunId)
@@ -836,6 +849,9 @@ export async function recordPayRunFinality(address: string, payRunId: string, in
     if (!transitions[payRun.status].includes(input.status)) throw Object.assign(new Error(`A ${payRun.status} pay run cannot be recorded as ${input.status}.`), { status: 409 })
     const acceptedBlockNumber = input.acceptedBlockNumber
     if (acceptedBlockNumber !== undefined && (!Number.isSafeInteger(acceptedBlockNumber) || acceptedBlockNumber < 0)) throw Object.assign(new Error('Invalid accepted block number.'), { status: 400 })
+    const verifiedPoolAddress = input.verifiedPoolAddress?.trim().toLowerCase() || ''
+    if (verifiedPoolAddress && (input.status !== 'finalized' || !/^0x[0-9a-f]{1,64}$/.test(verifiedPoolAddress) || acceptedBlockNumber === undefined)) throw Object.assign(new Error('Invalid verified pool evidence.'), { status: 400 })
+    payRun.verifiedPoolAddress = verifiedPoolAddress
     payRun.status = input.status
     payRun.items = payRun.items.map(item => ({ ...item, status: input.status }))
     payRun.acceptedBlockNumber = acceptedBlockNumber ?? payRun.acceptedBlockNumber

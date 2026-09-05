@@ -34,6 +34,8 @@ export type SavedBankPayout = {
   chainStatus: BankPayoutChainStatus
   chainCheckedAt: string
   acceptedBlockNumber: number | null
+  acceptedBlockTimestamp: string
+  paidBeforeExpiry: boolean | null
   chainMessage: string
   providerAmountPaid: string
   providerAmountReturned: string

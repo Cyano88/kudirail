@@ -2,7 +2,7 @@ import { RpcProvider, constants, hash } from 'starknet'
 import { STARKNET_USDC, getPaycrestOrder } from './paycrest'
 import { getAccount, recordBankPayoutChainEvidence, updateBankPayoutProvider } from './account-store'
 
-type ReceiptProvider = { getTransactionReceipt(transactionHash: string): Promise<any> }
+type ReceiptProvider = { getTransactionReceipt(transactionHash: string): Promise<any>; getBlockWithTxHashes?(blockIdentifier: number): Promise<any> }
 type ReceiptEvent = { from_address?: string; keys?: string[]; data?: string[] }
 
 function provider(): ReceiptProvider {
@@ -50,20 +50,27 @@ export async function reconcileBankPayout(address: string, payoutId: string, opt
 
   if (!payout.transactionHash) return { payout, chainPending: false }
   try {
-    const receipt = await (options.receiptProvider || provider()).getTransactionReceipt(payout.transactionHash)
-    const value = receipt.value as { block_number?: number; events?: ReceiptEvent[] }
-    if (receipt.isError()) return { payout: await recordBankPayoutChainEvidence(address, payout.id, { status: 'unknown', acceptedBlockNumber: value.block_number, message: 'Starknet returned an unreadable transaction receipt.' }), chainPending: false }
-    if (receipt.isReverted()) return { payout: await recordBankPayoutChainEvidence(address, payout.id, { status: 'reverted', acceptedBlockNumber: value.block_number, message: 'Starknet reports that this payment transaction reverted.' }), chainPending: false }
+    const receiptProvider = options.receiptProvider || provider()
+    const receipt = await receiptProvider.getTransactionReceipt(payout.transactionHash)
+    const value = receipt.value as { execution_status?: string; finality_status?: string; block_number?: number; events?: ReceiptEvent[] }
+    if (!receipt.isError() && !receipt.isReverted() && (value.execution_status !== 'SUCCEEDED' || !['ACCEPTED_ON_L1', 'ACCEPTED_ON_L2'].includes(value.finality_status || '') || !Number.isSafeInteger(value.block_number) || value.block_number! < 0)) return { payout, chainPending: true }
+    const block = value.block_number !== undefined && receiptProvider.getBlockWithTxHashes ? await receiptProvider.getBlockWithTxHashes(value.block_number).catch(() => null) : null
+    const timestamp = block?.timestamp
+    const acceptedBlockTimestamp = block?.block_number === value.block_number && typeof timestamp === 'number' && Number.isSafeInteger(timestamp) && timestamp > 0 && timestamp <= 8_640_000_000_000
+      ? new Date(timestamp * 1000).toISOString()
+      : undefined
+    if (receipt.isError()) return { payout: await recordBankPayoutChainEvidence(address, payout.id, { status: 'unknown', acceptedBlockNumber: value.block_number, acceptedBlockTimestamp, message: 'Starknet returned an unreadable transaction receipt.' }), chainPending: false }
+    if (receipt.isReverted()) return { payout: await recordBankPayoutChainEvidence(address, payout.id, { status: 'reverted', acceptedBlockNumber: value.block_number, acceptedBlockTimestamp, message: 'Starknet reports that this payment transaction reverted.' }), chainPending: false }
     const canonicalPoolAddress = options.canonicalPoolAddress === undefined ? poolAddress() : options.canonicalPoolAddress
-    if (!canonicalPoolAddress) return { payout: await recordBankPayoutChainEvidence(address, payout.id, { status: 'unknown', acceptedBlockNumber: value.block_number, message: 'The transaction succeeded, but the canonical STRK20 pool is not configured.' }), chainPending: false }
+    if (!canonicalPoolAddress) return { payout: await recordBankPayoutChainEvidence(address, payout.id, { status: 'unknown', acceptedBlockNumber: value.block_number, acceptedBlockTimestamp, message: 'The transaction succeeded, but the canonical STRK20 pool is not configured.' }), chainPending: false }
     const proved = receiptProvesPaycrestPayment(value.events || [], { poolAddress: canonicalPoolAddress, receiveAddress: payout.receiveAddress, amountUsdc: payout.amountUsdc })
     return { payout: await recordBankPayoutChainEvidence(address, payout.id, proved
-      ? { status: 'succeeded', acceptedBlockNumber: value.block_number, message: 'Starknet finalized the exact USDC transfer from the STRK20 pool to this Paycrest order address.' }
-      : { status: 'unknown', acceptedBlockNumber: value.block_number, message: 'The transaction succeeded, but its receipt does not prove the exact payment for this order.' }), chainPending: false }
+      ? { status: 'succeeded', acceptedBlockNumber: value.block_number, acceptedBlockTimestamp, message: 'Starknet finalized the exact USDC transfer from the STRK20 pool to this Paycrest order address.' }
+      : { status: 'unknown', acceptedBlockNumber: value.block_number, acceptedBlockTimestamp, message: 'The transaction succeeded, but its receipt does not prove the exact payment for this order.' }), chainPending: false }
   } catch (error: any) {
     const message = String(error?.message || error)
     if (/not found|transaction hash not found|code.?29/i.test(message)) {
-      return { payout: await recordBankPayoutChainEvidence(address, payout.id, { status: 'pending', message: 'The submitted transaction is not available from Starknet yet.' }), chainPending: true }
+      return { payout, chainPending: true }
     }
     throw error
   }

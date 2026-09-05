@@ -21,14 +21,15 @@ export async function verifyPayRunFinality(address: string, payRunId: string, op
   if (!payRun.transactionHash) throw Object.assign(new Error('This pay run has no transaction hash to verify.'), { status: 409 })
   try {
     const receipt = await (options.provider || defaultProvider()).getTransactionReceipt(payRun.transactionHash)
-    const value = receipt.value as { block_number?: number; events?: { from_address?: string }[] }
+    const value = receipt.value as { execution_status?: string; finality_status?: string; block_number?: number; events?: { from_address?: string }[] }
     if (receipt.isError()) return { payRun: publicPayRun(await recordPayRunFinality(address, payRun.id, { status: 'unknown', acceptedBlockNumber: value.block_number, message: 'Starknet returned an unreadable receipt. KudiRoll has not finalized this payroll.' })) }
     if (receipt.isReverted()) return { payRun: publicPayRun(await recordPayRunFinality(address, payRun.id, { status: 'reverted', acceptedBlockNumber: value.block_number, message: 'Starknet reports that this private payroll transaction reverted.' })) }
+    if (value.execution_status !== 'SUCCEEDED' || !['ACCEPTED_ON_L1', 'ACCEPTED_ON_L2'].includes(value.finality_status || '') || !Number.isSafeInteger(value.block_number) || value.block_number! < 0) return { pending: true, message: 'Starknet has not returned an accepted successful receipt with a block number yet.' }
     const poolAddress = options.poolAddress === undefined ? defaultPoolAddress() : options.poolAddress.toLowerCase()
     if (!/^0x[0-9a-f]{1,64}$/.test(poolAddress)) return { payRun: publicPayRun(await recordPayRunFinality(address, payRun.id, { status: 'unknown', acceptedBlockNumber: value.block_number, message: 'The receipt succeeded, but STRK20_POOL_ADDRESS is not configured, so KudiRoll cannot verify that it touched the canonical pool.' })) }
     const touchedPool = receiptTouchesPool(value.events || [], poolAddress)
     return { payRun: publicPayRun(await recordPayRunFinality(address, payRun.id, touchedPool
-      ? { status: 'finalized', acceptedBlockNumber: value.block_number, message: 'Starknet finalized this transaction and its receipt contains an event from the configured STRK20 pool.' }
+      ? { status: 'finalized', acceptedBlockNumber: value.block_number, verifiedPoolAddress: poolAddress, message: 'Starknet finalized this transaction and its receipt contains an event from the configured STRK20 pool.' }
       : { status: 'unknown', acceptedBlockNumber: value.block_number, message: 'The transaction succeeded, but its receipt does not prove interaction with the configured STRK20 pool.' })) }
   } catch (error: any) {
     const message = String(error?.message || error)

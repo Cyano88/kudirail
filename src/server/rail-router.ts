@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { createPayRun, getAccount, publicPayRun, resolveUnknownPayRun, updatePayRun } from './account-store'
 import { requireRecentSession, requireSessionAddress } from './account-router'
 import { createPayRunExecutionManifest } from './pay-run-manifest'
+import { createPayRunEvidenceBundle } from './pay-run-evidence'
 import { verifyPayRunFinality } from './pay-run-finality-service'
 import { rateLimit } from './rate-limit'
 import { paycrestConfiguration } from './paycrest'
@@ -59,6 +60,19 @@ export function createRailRouter() {
       const payRun = account.payRuns.find(item => item.id === req.params.payRunId)
       if (!payRun) throw Object.assign(new Error('Pay run not found.'), { status: 404 })
       res.json({ ok: true, executionManifest: createPayRunExecutionManifest(payRun) })
+    } catch (error) {
+      res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })
+    }
+  })
+
+  router.get('/pay-runs/:payRunId/evidence', async (req, res) => {
+    try {
+      const account = await getAccount(await requireSessionAddress(req))
+      const payRun = account.payRuns.find(item => item.id === req.params.payRunId)
+      if (!payRun) throw Object.assign(new Error('Pay run not found.'), { status: 404 })
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.setHeader('Content-Disposition', `attachment; filename="kudiroll-payroll-${payRun.id}.json"`)
+      res.send(JSON.stringify(createPayRunEvidenceBundle(account, payRun), null, 2))
     } catch (error) {
       res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })
     }
