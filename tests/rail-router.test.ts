@@ -42,6 +42,11 @@ test('authenticated HTTP rail contract creates and replays a private-payroll int
       headers: { Cookie: `kudiroll_session=${token}`, 'Content-Type': 'application/json', 'Idempotency-Key': 'http-contract-key-0001' },
       body: JSON.stringify(request),
     })
+    const stale = await fetch(`http://127.0.0.1:${port}/api/v1/pay-runs`, {
+      method: 'POST', headers: { Cookie: `kudiroll_session=${token}`, 'Content-Type': 'application/json', 'X-KudiRoll-Account': '0xc99' }, body: JSON.stringify(request),
+    })
+    assert.equal(stale.status, 409)
+    assert.equal((await store.getAccount(address)).payRuns.length, 0)
     const firstResponse = await send()
     assert.equal(firstResponse.status, 201)
     const first = await firstResponse.json()
@@ -65,4 +70,27 @@ test('authenticated HTTP rail contract creates and replays a private-payroll int
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
   }
+})
+
+
+test('funding recovery requires authentication and the matching attempt', async () => {
+  const { createAccountRouter } = await import('../src/server/account-router')
+  const owner = '0xf901'
+  const token = await auth.createAuthSession(owner, 'wallet', '')
+  const app = express(); app.use(express.json()); app.use('/api/account', createAccountRouter())
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise<void>(resolve => server.once('listening', resolve))
+  const origin = `http://127.0.0.1:${(server.address() as any).port}`
+  const post = (path: string, body: any, authenticated = true) => fetch(`${origin}/api/account${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(authenticated ? { Cookie: `kudiroll_session=${token}`, 'X-KudiRoll-Account': owner } : {}) }, body: JSON.stringify(body) })
+  try {
+    const begun = await post('/treasury/funding-attempt', { amountUsdc: '1' })
+    assert.equal(begun.status, 201)
+    const { attempt } = await begun.json()
+    const recovery = { attemptId: attempt.id, confirmation: 'NO DEPOSIT IN READY' }
+    assert.equal((await post('/treasury/funding-attempt/resolve', recovery, false)).status, 401)
+    assert.equal((await store.getAccount(owner)).fundingAttempt?.id, attempt.id)
+    assert.equal((await post('/treasury/funding-attempt/resolve', { ...recovery, attemptId: 'stale' })).status, 409)
+    assert.equal((await post('/treasury/funding-attempt/resolve', recovery)).status, 200)
+    assert.equal((await store.getAccount(owner)).fundingAttempt, null)
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
 })

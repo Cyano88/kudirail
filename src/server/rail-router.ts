@@ -97,7 +97,7 @@ export function createRailRouter() {
 
   router.post('/pay-runs/:payRunId/resolve-unknown', rateLimit('rail-pay-run-resolve-unknown', 5, 15 * 60 * 1000, 'Too many payroll recovery requests. Try again later.'), async (req, res) => {
     try {
-      const { session } = await requireRecentSession(req, 'passkey')
+      const { session } = await requireRecentSession(req)
       const payRun = await resolveUnknownPayRun(session.address, req.params.payRunId, req.body?.confirmation)
       res.json({ ok: true, payRun: publicPayRun(payRun) })
     } catch (error) {

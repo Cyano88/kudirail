@@ -282,14 +282,15 @@ function assertPhase0Order(input: Phase0OrderInput) {
   if (!normalizeStarknetAddress(input.refundAddress)) throw Object.assign(new Error('A valid Starknet refund address is required.'), { status: 400 })
 }
 
-export async function createPhase0PaycrestOrder(input: Phase0OrderInput, fetcher: FetchLike = fetch) {
+export async function createPhase0PaycrestOrder(input: Phase0OrderInput, fetcher: FetchLike = fetch, creation?: { reference: string; beforeSend: () => void }) {
   assertPhase0Order(input)
   const { accountName } = await verifyPaycrestAccount({
     institution: input.institution,
     accountIdentifier: input.accountIdentifier,
   }, fetcher)
   const prefix = process.env.PAYCREST_REFERENCE_PREFIX?.trim() || 'kudiroll-'
-  const reference = `${prefix}phase0-${Date.now()}`
+  const reference = creation?.reference || `${prefix}phase0-${Date.now()}`
+  creation?.beforeSend()
   const data = await jsonFetch(fetcher, '/v2/sender/orders', {
     method: 'POST',
     headers: authenticatedHeaders(),

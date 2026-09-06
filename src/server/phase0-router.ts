@@ -1,7 +1,8 @@
+import { beginBankOrderCreation, releaseUnsentBankOrder } from './account-store'
 import { paymentWorkspace } from '../payment-workspace'
 import { Router } from 'express'
 import { requireSessionAddress } from './account-router'
-import { createPhase0PaycrestOrder, getPaycrestOrder, listPaycrestInstitutions, paycrestConfiguration, runPublicPaycrestProbe, verifyPaycrestAccount } from './paycrest'
+import { createPhase0PaycrestOrder, getPaycrestOrder, listPaycrestOrders, listPaycrestInstitutions, paycrestConfiguration, runPublicPaycrestProbe, verifyPaycrestAccount } from './paycrest'
 import { assertCanCreateBankPayout, beginBankPayoutSubmission, cancelBankPayoutSubmission, getAccount, markBankPayoutUnknown, recordBankPayoutOrder, recordBankPayoutTransaction } from './account-store'
 import { reconcileBankPayout } from './bank-payout-reconciliation'
 
@@ -14,7 +15,7 @@ function messageOf(error: unknown) {
   return error instanceof Error ? error.message : 'Unexpected Phase 0 failure.'
 }
 
-export function createPhase0Router() {
+export function createPhase0Router(options: { fetcher?: typeof fetch } = {}) {
   const router = Router()
   let lastPublicProbe: Awaited<ReturnType<typeof runPublicPaycrestProbe>> | null = null
   router.use((_req, res, next) => {
@@ -51,7 +52,7 @@ export function createPhase0Router() {
       const account = await getAccount(address)
       if (paycrestConfiguration().apiConfigured) await Promise.allSettled(account.bankPayouts.map(payout => reconcileBankPayout(address, payout.id)))
       const refreshed = await getAccount(address)
-      res.json({ ok: true, configured: paycrestConfiguration().apiConfigured, orders: refreshed.bankPayouts })
+      res.json({ ok: true, configured: paycrestConfiguration().apiConfigured, orders: refreshed.bankPayouts, pendingCreation: refreshed.bankOrderAttempt ?? null })
     } catch (error) {
       res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })
     }
@@ -72,14 +73,33 @@ export function createPhase0Router() {
     try {
       const refundAddress = await requireSessionAddress(req)
       const workspace = paymentWorkspace(req.body?.workspace)
-      await assertCanCreateBankPayout(refundAddress)
-      const created = await createPhase0PaycrestOrder({ ...req.body, refundAddress })
-      const order = await recordBankPayoutOrder(refundAddress, { ...created, workspace, institution: req.body?.institution })
-      res.status(201).json({ ok: true, order })
+      const attempt = await beginBankOrderCreation(refundAddress, workspace)
+      let sent = false
+      try {
+        const created = await createPhase0PaycrestOrder({ ...req.body, refundAddress }, options.fetcher || fetch, { reference: attempt.reference, beforeSend: () => { sent = true } })
+        const order = await recordBankPayoutOrder(refundAddress, { ...created, workspace, institution: req.body?.institution })
+        res.status(201).json({ ok: true, order })
+      } catch (error) {
+        if (!sent) await releaseUnsentBankOrder(refundAddress, attempt.id)
+        throw error
+      }
     } catch (error) {
       res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })
     }
   })
+  router.post('/paycrest/creation/recover', async (req, res) => {
+    try {
+      const address = await requireSessionAddress(req)
+      const attempt = (await getAccount(address)).bankOrderAttempt
+      if (!attempt) return res.json({ ok: true })
+      const orders = await listPaycrestOrders(address)
+      const matches = orders.filter(order => order.reference === attempt.reference)
+      if (matches.length !== 1) throw Object.assign(new Error('No unique matching provider order is visible yet. Keep this attempt blocked and ask Paycrest to locate its reference.'), { status: 409 })
+      const order = await recordBankPayoutOrder(address, { ...matches[0], workspace: attempt.workspace })
+      res.json({ ok: true, order })
+    } catch (error) { res.status(statusOf(error)).json({ ok: false, error: messageOf(error) }) }
+  })
+
   router.post('/paycrest/orders/recover', async (req, res) => {
     try {
       const address = await requireSessionAddress(req)
@@ -88,7 +108,7 @@ export function createPhase0Router() {
       try { ownsOrder = BigInt(providerOrder.refundAddress) === BigInt(address) } catch {}
       if (!ownsOrder) throw Object.assign(new Error('This Paycrest order does not belong to the signed-in Starknet account.'), { status: 403 })
       const payout = await recordBankPayoutOrder(address, { ...providerOrder, status: providerOrder.status })
-      await recordBankPayoutTransaction(address, payout.id, { transactionHash: req.body?.transactionHash })
+      if (req.body?.transactionHash) await recordBankPayoutTransaction(address, payout.id, { transactionHash: req.body.transactionHash })
       res.json({ ok: true, ...(await reconcileBankPayout(address, payout.id)) })
     } catch (error) {
       res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })

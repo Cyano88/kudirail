@@ -111,7 +111,8 @@ test('keeps unknown wallet outcomes recoverable while preventing reused transact
   await store.updatePayRun(owner, second.id, { status: 'prepared' })
   await store.updatePayRun(owner, second.id, { status: 'submitting', expectedPolicyVersion: 0 })
   await assert.rejects(store.updatePayRun(owner, second.id, { status: 'submitted', transactionHash: '0x456' }), /already attached/)
-  await store.updatePayRun(owner, second.id, { status: 'failed' })
+  await assert.rejects(store.updatePayRun(owner, second.id, { status: 'failed' }), /cannot move directly/)
+  await store.resolveUnknownPayRun(owner, second.id, 'NO TRANSACTION IN READY')
 })
 
 test('blocks new payroll while an outcome is unknown and requires explicit recovery confirmation', async () => {

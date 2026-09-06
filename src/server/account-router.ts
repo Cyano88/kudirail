@@ -1,3 +1,4 @@
+import { beginTreasuryFunding, resolveTreasuryFunding } from './account-store'
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import { Router } from 'express'
 import { RpcProvider, constants } from 'starknet'
@@ -108,6 +109,12 @@ async function requireSession(req: any) {
   const token = sessionToken(req)
   const session = await getAuthSession(token)
   if (!session) throw Object.assign(new Error('Your KudiRoll session has expired. Sign in again.'), { status: 401 })
+  const expected = req.get?.('X-KudiRoll-Account') || req.headers?.['x-kudiroll-account']
+  if (expected) {
+    let matches = false
+    try { matches = BigInt(addressOf(expected)) === BigInt(session.address) } catch {}
+    if (!matches) throw Object.assign(new Error('The signed-in account changed. Reload this workspace before continuing.'), { status: 409 })
+  }
   return { token, session }
 }
 
@@ -548,6 +555,18 @@ export function createAccountRouter(options: { emailFetcher?: typeof fetch } = {
       const backup = await getEncryptedWalletBackup(await requireSessionAddress(req))
       if (!backup) return res.status(404).json({ ok: false, error: 'No encrypted wallet backup exists for this account.' })
       res.json({ ok: true, backup })
+    } catch (error) { res.status(statusOf(error)).json({ ok: false, error: messageOf(error) }) }
+  })
+
+  router.post('/treasury/funding-attempt', async (req, res) => {
+    try { res.status(201).json({ ok: true, attempt: await beginTreasuryFunding(await requireSessionAddress(req), req.body) }) }
+    catch (error) { res.status(statusOf(error)).json({ ok: false, error: messageOf(error) }) }
+  })
+  router.post('/treasury/funding-attempt/resolve', async (req, res) => {
+    try {
+      const { session } = await requireRecentSession(req)
+      await resolveTreasuryFunding(session.address, req.body)
+      res.json({ ok: true })
     } catch (error) { res.status(statusOf(error)).json({ ok: false, error: messageOf(error) }) }
   })
 
