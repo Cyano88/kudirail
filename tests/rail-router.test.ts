@@ -94,3 +94,25 @@ test('funding recovery requires authentication and the matching attempt', async 
     assert.equal((await store.getAccount(owner)).fundingAttempt, null)
   } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
 })
+
+test('worker import HTTP requires owner authentication and preserves atomic validation', async () => {
+ const { createAccountRouter } = await import('../src/server/account-router')
+ const owner = '0xcc01'
+ const team = await store.createTeam(owner, { name: 'HTTP import', workspace: 'enterprise' })
+ const token = await auth.createAuthSession(owner, 'wallet', '')
+ const app = express(); app.use(express.json()); app.use('/api/account', createAccountRouter())
+ const server = app.listen(0, '127.0.0.1')
+ await new Promise<void>(resolve => server.once('listening', resolve))
+ const url = `http://127.0.0.1:${(server.address() as any).port}/api/account/teams/${team.id}/workers/import`
+ const rows = [{ name: 'Imported Worker', walletAddress: '0xcc02', defaultAmountUsdc: '1' }]
+ const post = (workers: any, authenticated = true, expected = owner) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(authenticated ? { Cookie: `kudiroll_session=${token}`, 'X-KudiRoll-Account': expected } : {}) }, body: JSON.stringify({ workers }) })
+ try {
+  assert.equal((await post(rows, false)).status, 401)
+  assert.equal((await post(rows, true, '0xcc99')).status, 409)
+  assert.equal((await post([...rows, { ...rows[0], walletAddress: '0x0cc02' }])).status, 400)
+  assert.equal((await store.getAccount(owner)).teams[0].workers.length, 0)
+  assert.equal((await post(rows)).status, 201)
+  assert.equal((await post(rows)).status, 400)
+  assert.equal((await store.getAccount(owner)).teams[0].workers.length, 1)
+ } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
+})

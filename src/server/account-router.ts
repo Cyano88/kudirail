@@ -4,7 +4,7 @@ import { Router } from 'express'
 import { RpcProvider, constants } from 'starknet'
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server'
 import type { AuthenticationResponseJSON, RegistrationResponseJSON, WebAuthnCredential } from '@simplewebauthn/server'
-import { addWorker, createPayRun, createTeam, deleteAccount, deleteTeam, findPasskey, findVerifiedAccountByEmail, getAccount, getEncryptedWalletBackup, linkVerifiedBusinessEmail, markBusinessEmailVerified, publicAccount, publicPayRun, recordTreasuryShield, removePasskey, removeWorker, resolveUnknownPayRun, saveEncryptedWalletBackup, savePasskey, updateBusinessProfile, updatePasskeyCounter, updatePasskeyPrf, updatePayRun, updatePayrollPolicy, updateTeam } from './account-store'
+import { addWorkers, addWorker, createPayRun, createTeam, deleteAccount, deleteTeam, findPasskey, findVerifiedAccountByEmail, getAccount, getEncryptedWalletBackup, linkVerifiedBusinessEmail, markBusinessEmailVerified, publicAccount, publicPayRun, recordTreasuryShield, removePasskey, removeWorker, resolveUnknownPayRun, saveEncryptedWalletBackup, savePasskey, updateBusinessProfile, updatePasskeyCounter, updatePasskeyPrf, updatePayRun, updatePayrollPolicy, updateTeam } from './account-store'
 import { consumeAuthChallenge, createAuthSession, deleteAuthSession, deleteAuthSessionsForAddress, deleteAuthSessionsForCredential, getAuthSession, saveAuthChallenge } from './auth-store'
 import { deriveTreasuryReadiness } from '../treasury-readiness'
 import { rateLimit } from './rate-limit'
@@ -613,6 +613,10 @@ export function createAccountRouter(options: { emailFetcher?: typeof fetch } = {
   })
   router.delete('/teams/:teamId', async (req, res) => {
     try { res.json({ ok: true, deleted: await deleteTeam(await requireSessionAddress(req), req.params.teamId) }) }
+    catch (error) { res.status(statusOf(error)).json({ ok: false, error: messageOf(error) }) }
+  })
+  router.post('/teams/:teamId/workers/import', async (req, res) => {
+    try { res.status(201).json({ ok: true, workers: await addWorkers(await requireSessionAddress(req), req.params.teamId, req.body?.workers) }) }
     catch (error) { res.status(statusOf(error)).json({ ok: false, error: messageOf(error) }) }
   })
   router.post('/teams/:teamId/workers', async (req, res) => {

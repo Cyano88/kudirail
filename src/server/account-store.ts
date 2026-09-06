@@ -1,3 +1,4 @@
+import { canonicalWorkerAddress, validateWorkerRows, MAX_IMPORT_WORKERS, type WorkerInput } from '../worker-import'
 import { paymentWorkspace, type PaymentWorkspace } from '../payment-workspace'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
@@ -753,20 +754,25 @@ export async function deleteTeam(address: string, teamId: string) {
 }
 
 export async function addWorker(address: string, teamId: string, input: any) {
+  return (await addWorkers(address, teamId, [input]))[0]
+}
+
+export async function addWorkers(address: string, teamId: string, input: unknown) {
   return mutate(store => {
     const account = accountIn(store, address)
     const team = account.teams.find(item => item.id === teamId)
     if (!team) throw Object.assign(new Error('Team not found.'), { status: 404 })
-    const name = cleanText(input?.name, 80)
-    const workerWallet = walletAddress(input?.walletAddress)
-    if (name.length < 2) throw Object.assign(new Error('Worker name must contain at least 2 characters.'), { status: 400 })
-    if (team.workers.some(worker => worker.walletAddress === workerWallet)) throw Object.assign(new Error('This wallet is already in the team.'), { status: 409 })
+    if (!Array.isArray(input) || input.length < 1 || input.length > MAX_IMPORT_WORKERS || input.some(row => !row || typeof row !== 'object')) throw Object.assign(new Error('Import between 1 and 100 workers.'), { status: 400 })
+    const rows = input as WorkerInput[]
+    const errors = validateWorkerRows(rows, team.workers)
+    const invalid = errors.findIndex(row => row.length > 0)
+    if (invalid !== -1) throw Object.assign(new Error(`Row ${invalid + 1}: ${errors[invalid].join(' ')}`), { status: 400 })
     const now = new Date().toISOString()
-    const worker: SavedWorker = { id: randomUUID(), name, walletAddress: workerWallet, defaultAmountUsdc: amount(input?.defaultAmountUsdc), createdAt: now, updatedAt: now }
-    team.workers.push(worker)
+    const workers: SavedWorker[] = rows.map(row => ({ id: randomUUID(), name: row.name.trim(), walletAddress: canonicalWorkerAddress(row.walletAddress), defaultAmountUsdc: row.defaultAmountUsdc.trim(), createdAt: now, updatedAt: now }))
+    team.workers.push(...workers)
     team.updatedAt = now
     account.updatedAt = now
-    return worker
+    return workers
   })
 }
 
