@@ -13,6 +13,7 @@ export type BankPayoutChainStatus = 'not-checked' | 'pending' | 'succeeded' | 'r
 export type BankPayoutSubmissionState = 'not-started' | 'submitting' | 'submitted' | 'cancelled' | 'unknown'
 
 export type SavedBankPayout = {
+  workspace?: 'standard' | 'enterprise'
   id: string
   reference: string
   providerStatus: string

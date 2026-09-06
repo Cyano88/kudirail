@@ -5,6 +5,7 @@ import type { PayRunExecutionManifest } from '../rail/contracts'
 export function createPayRunExecutionManifest(payRun: SavedPayRun): PayRunExecutionManifest {
   const settlementMode = payRun.settlementMode || 'private'
   const snapshot = {
+    ...(payRun.workspace === 'enterprise' ? { workspace: 'enterprise' as const } : {}),
     payRunId: payRun.id,
     teamId: payRun.teamId,
     settlementMode,

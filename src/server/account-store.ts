@@ -1,3 +1,4 @@
+import { paymentWorkspace, type PaymentWorkspace } from '../payment-workspace'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
@@ -16,6 +17,7 @@ export type SavedWorker = {
 }
 
 export type SavedTeam = {
+  workspace?: PaymentWorkspace
   id: string
   name: string
   description: string
@@ -37,6 +39,7 @@ export type PayRunStatus = 'draft' | 'prepared' | 'submitting' | 'submitted' | '
 export type PayRunSettlementMode = 'public-wallet' | 'private'
 
 export type SavedPayRun = {
+  workspace?: PaymentWorkspace
   id: string
   teamId: string
   teamName: string
@@ -458,6 +461,7 @@ export async function recordBankPayoutOrder(address: string, input: any) {
     if (blocked) throw Object.assign(new Error('Resolve the existing bank payout before creating another order.'), { status: 409, payoutId: blocked.id })
     const now = new Date().toISOString()
     const payout: SavedBankPayout = {
+      workspace: paymentWorkspace(input?.workspace),
       id: cleanText(input?.id, 80), reference: cleanText(input?.reference, 120), providerStatus: cleanText(input?.status, 32).toLowerCase() || 'initiated', displayStatus: 'ready-to-pay',
       amountNgn: cleanText(input?.amountNgn, 32), amountUsdc: amount(input?.amountUsdc), network: 'starknet', token: 'USDC',
       receiveAddress: walletAddress(input?.receiveAddress), refundAddress: account.walletAddress,
@@ -654,9 +658,9 @@ export async function createTeam(address: string, input: any) {
     const account = accountIn(store, address)
     const name = cleanText(input?.name, 60)
     if (name.length < 2) throw Object.assign(new Error('Team name must contain at least 2 characters.'), { status: 400 })
-    if (account.teams.some(team => team.name.toLowerCase() === name.toLowerCase())) throw Object.assign(new Error('A team with this name already exists.'), { status: 409 })
+    if (account.teams.some(team => paymentWorkspace(team.workspace) === paymentWorkspace(input?.workspace) && team.name.toLowerCase() === name.toLowerCase())) throw Object.assign(new Error('A team with this name already exists.'), { status: 409 })
     const now = new Date().toISOString()
-    const team: SavedTeam = { id: randomUUID(), name, description: cleanText(input?.description, 160), workers: [], createdAt: now, updatedAt: now }
+    const team: SavedTeam = { id: randomUUID(), workspace: paymentWorkspace(input?.workspace), name, description: cleanText(input?.description, 160), workers: [], createdAt: now, updatedAt: now }
     account.teams.unshift(team)
     account.updatedAt = now
     return team
@@ -670,7 +674,7 @@ export async function updateTeam(address: string, teamId: string, input: any) {
     if (!team) throw Object.assign(new Error('Team not found.'), { status: 404 })
     const name = cleanText(input?.name, 60)
     if (name.length < 2) throw Object.assign(new Error('Team name must contain at least 2 characters.'), { status: 400 })
-    if (account.teams.some(item => item.id !== team.id && item.name.toLowerCase() === name.toLowerCase())) throw Object.assign(new Error('A team with this name already exists.'), { status: 409 })
+    if (account.teams.some(item => item.id !== team.id && paymentWorkspace(item.workspace) === paymentWorkspace(team.workspace) && item.name.toLowerCase() === name.toLowerCase())) throw Object.assign(new Error('A team with this name already exists.'), { status: 409 })
     team.name = name
     team.description = cleanText(input?.description, 160)
     team.updatedAt = new Date().toISOString()
@@ -728,8 +732,9 @@ export async function createPayRun(address: string, input: any, idempotencyKey =
     const teamId = cleanText(input?.teamId, 64)
     const clientReference = cleanText(input?.clientReference, 100)
     const settlementMode: PayRunSettlementMode = input?.settlementMode === 'private' ? 'private' : 'public-wallet'
+    const workspace = paymentWorkspace(input?.workspace)
     const requested = Array.isArray(input?.items) ? input.items : []
-    const normalizedRequest = { teamId, clientReference, settlementMode, items: requested.map((item: any) => ({ workerId: cleanText(item?.workerId, 64), amountUsdc: cleanText(item?.amountUsdc, 32) })) }
+    const normalizedRequest = { ...(workspace === 'enterprise' ? { workspace } : {}), teamId, clientReference, settlementMode, items: requested.map((item: any) => ({ workerId: cleanText(item?.workerId, 64), amountUsdc: cleanText(item?.amountUsdc, 32) })) }
     const requestHash = createHash('sha256').update(JSON.stringify(normalizedRequest)).digest('hex')
     const normalizedIdempotencyKey = cleanText(idempotencyKey, 128)
     const idempotencyKeyHash = normalizedIdempotencyKey ? createHash('sha256').update(normalizedIdempotencyKey).digest('hex') : ''
@@ -743,6 +748,8 @@ export async function createPayRun(address: string, input: any, idempotencyKey =
     if (account.payRuns.some(item => item.status === 'submitting' || item.status === 'unknown')) throw Object.assign(new Error('Resolve the existing unknown payroll submission before creating another pay run.'), { status: 409 })
     const team = account.teams.find(item => item.id === teamId)
     if (!team) throw Object.assign(new Error('Select a saved team.'), { status: 404 })
+    if (paymentWorkspace(team.workspace) !== workspace) throw Object.assign(new Error('The selected team belongs to a different workspace.'), { status: 409 })
+    if (workspace === 'enterprise' && settlementMode !== 'private') throw Object.assign(new Error('Enterprise USDC payroll requires private transfers.'), { status: 400 })
     if (!requested.length) throw Object.assign(new Error('Select at least one worker.'), { status: 400 })
     const workerIds = requested.map((item: any) => cleanText(item?.workerId, 64))
     if (new Set(workerIds).size !== workerIds.length) throw Object.assign(new Error('Each worker can appear only once in a pay run.'), { status: 400 })
@@ -756,7 +763,7 @@ export async function createPayRun(address: string, input: any, idempotencyKey =
     const maxPayRun = amountUnits(account.payrollPolicy.maxPayRunUsdc)
     if (maxPayRun > 0n && total > maxPayRun) throw Object.assign(new Error(`This pay run exceeds the organization limit of ${account.payrollPolicy.maxPayRunUsdc} USDC.`), { status: 409 })
     const now = new Date().toISOString()
-    const payRun: SavedPayRun = { id: randomUUID(), teamId: team.id, teamName: team.name, settlementMode, status: 'draft', totalUsdc: `${total / 1_000_000n}.${(total % 1_000_000n).toString().padStart(6, '0')}`.replace(/\.?0+$/, ''), items, transactionHash: '', submissionAttemptedAt: '', finalityCheckedAt: '', acceptedBlockNumber: null, finalityMessage: '', clientReference, idempotencyKeyHash, requestHash, policySnapshot: policySnapshot(account.payrollPolicy), policyAuthorizedAt: now, createdAt: now, updatedAt: now }
+    const payRun: SavedPayRun = { id: randomUUID(), workspace, teamId: team.id, teamName: team.name, settlementMode, status: 'draft', totalUsdc: `${total / 1_000_000n}.${(total % 1_000_000n).toString().padStart(6, '0')}`.replace(/\.?0+$/, ''), items, transactionHash: '', submissionAttemptedAt: '', finalityCheckedAt: '', acceptedBlockNumber: null, finalityMessage: '', clientReference, idempotencyKeyHash, requestHash, policySnapshot: policySnapshot(account.payrollPolicy), policyAuthorizedAt: now, createdAt: now, updatedAt: now }
     account.payRuns.unshift(payRun)
     appendTreasuryAudit(account, 'pay-run.created', payRun.id, `Created ${payRun.totalUsdc} USDC pay-run intent.`, now)
     account.updatedAt = now
@@ -802,6 +809,7 @@ export async function updatePayRun(address: string, payRunId: string, input: any
       throw Object.assign(new Error(`A ${payRun.status} pay run cannot move directly to ${status}.`), { status: 409 })
     }
     if (status === 'prepared' || status === 'submitting') {
+      if (account.payRuns.some(item => item.id !== payRun.id && ['submitting', 'unknown'].includes(item.status))) throw Object.assign(new Error('Resolve the existing unknown payroll submission in History before preparing or submitting another pay run.'), { status: 409 })
       if (account.payrollPolicy.payoutsPaused) throw Object.assign(new Error('Payroll payouts are paused by the organization policy.'), { status: 409 })
       const maxPayRun = amountUnits(account.payrollPolicy.maxPayRunUsdc)
       if (maxPayRun > 0n && amountUnits(payRun.totalUsdc) > maxPayRun) throw Object.assign(new Error(`This pay run exceeds the organization limit of ${account.payrollPolicy.maxPayRunUsdc} USDC.`), { status: 409 })
@@ -812,8 +820,8 @@ export async function updatePayRun(address: string, payRunId: string, input: any
     const transactionHash = cleanText(input?.transactionHash, 80).toLowerCase()
     if (status === 'submitted' && !/^0x[0-9a-fA-F]{1,64}$/.test(transactionHash)) throw Object.assign(new Error('A transaction hash is required for a submitted pay run.'), { status: 400 })
     if (transactionHash && !/^0x[0-9a-fA-F]{1,64}$/.test(transactionHash)) throw Object.assign(new Error('Invalid transaction hash.'), { status: 400 })
-    if (transactionHash && account.payRuns.some(item => item.id !== payRun.id && item.transactionHash.toLowerCase() === transactionHash)) throw Object.assign(new Error('This transaction hash is already attached to another pay run.'), { status: 409 })
-    if (payRun.transactionHash && transactionHash && payRun.transactionHash !== transactionHash) throw Object.assign(new Error('A pay run cannot change its recovered transaction hash.'), { status: 409 })
+    if (transactionHash && account.payRuns.some(item => item.id !== payRun.id && Boolean(item.transactionHash) && BigInt(item.transactionHash) === BigInt(transactionHash))) throw Object.assign(new Error('This transaction hash is already attached to another pay run.'), { status: 409 })
+    if (payRun.transactionHash && transactionHash && BigInt(payRun.transactionHash) !== BigInt(transactionHash)) throw Object.assign(new Error('A pay run cannot change its recovered transaction hash.'), { status: 409 })
     payRun.status = status as SavedPayRun['status']
     if ((status === 'submitted' || status === 'unknown') && transactionHash) payRun.transactionHash = transactionHash
     if (status === 'submitting') payRun.submissionAttemptedAt = new Date().toISOString()

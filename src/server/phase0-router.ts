@@ -1,3 +1,4 @@
+import { paymentWorkspace } from '../payment-workspace'
 import { Router } from 'express'
 import { requireSessionAddress } from './account-router'
 import { createPhase0PaycrestOrder, getPaycrestOrder, listPaycrestInstitutions, paycrestConfiguration, runPublicPaycrestProbe, verifyPaycrestAccount } from './paycrest'
@@ -70,9 +71,10 @@ export function createPhase0Router() {
   router.post('/paycrest/order', async (req, res) => {
     try {
       const refundAddress = await requireSessionAddress(req)
+      const workspace = paymentWorkspace(req.body?.workspace)
       await assertCanCreateBankPayout(refundAddress)
       const created = await createPhase0PaycrestOrder({ ...req.body, refundAddress })
-      const order = await recordBankPayoutOrder(refundAddress, { ...created, institution: req.body?.institution })
+      const order = await recordBankPayoutOrder(refundAddress, { ...created, workspace, institution: req.body?.institution })
       res.status(201).json({ ok: true, order })
     } catch (error) {
       res.status(statusOf(error)).json({ ok: false, error: messageOf(error) })
@@ -123,7 +125,7 @@ export function createPhase0Router() {
       const payout = result?.payout || (await getAccount(address)).bankPayouts.find(item => item.id === req.params.orderId)
       if (!payout) throw Object.assign(new Error('Bank payout not found.'), { status: 404 })
       const evidence = {
-        schema: 'kudirail.bank-payout-incident.v1', exportedAt: new Date().toISOString(), orderId: payout.id, reference: payout.reference,
+        schema: 'kudirail.bank-payout-incident.v1', workspace: payout.workspace ?? 'standard', exportedAt: new Date().toISOString(), orderId: payout.id, reference: payout.reference,
         status: { product: payout.displayStatus, paycrest: payout.providerStatus, chain: payout.chainStatus, submission: payout.submissionState },
         payment: { amountUsdc: payout.amountUsdc, amountNgn: payout.amountNgn, network: payout.network, token: payout.token, receiveAddress: payout.receiveAddress, refundAddress: payout.refundAddress },
         recipient: { accountName: payout.accountName, bankLast4: payout.bankLast4, institution: payout.institution },

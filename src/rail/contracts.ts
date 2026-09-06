@@ -1,4 +1,5 @@
 export type PayRunExecutionManifest = {
+  workspace?: 'enterprise'
   version: '2'
   kind: 'strk20.payroll-intent'
   network: 'starknet-mainnet'

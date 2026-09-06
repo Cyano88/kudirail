@@ -106,6 +106,8 @@ test('keeps unknown wallet outcomes recoverable while preventing reused transact
   await store.recordPayRunFinality(owner, first.id, { status: 'unknown', message: 'Receipt is not final yet.' })
   assert.equal((await store.updatePayRun(owner, first.id, { status: 'unknown', transactionHash: '0x456' })).transactionHash, '0x456')
   await assert.rejects(store.updatePayRun(owner, first.id, { status: 'submitted', transactionHash: '0x457' }), /cannot change its recovered transaction hash/)
+  await assert.rejects(store.updatePayRun(owner, second.id, { status: 'prepared' }), /unknown payroll submission/)
+  await store.updatePayRun(owner, first.id, { status: 'submitted', transactionHash: '0x456' })
   await store.updatePayRun(owner, second.id, { status: 'prepared' })
   await store.updatePayRun(owner, second.id, { status: 'submitting', expectedPolicyVersion: 0 })
   await assert.rejects(store.updatePayRun(owner, second.id, { status: 'submitted', transactionHash: '0x456' }), /already attached/)

@@ -22,6 +22,7 @@ export function createPayRunEvidenceBundle(account: AccountRecord, payRun: Saved
     generatedAt,
     evidenceScope: 'sanitized-shareable' as const,
     payroll: {
+      ...(payRun.workspace === 'enterprise' ? { workspace: 'enterprise' as const } : {}),
       payRunId: payRun.id,
       network: manifest.network,
       settlementMode: manifest.settlementMode,
