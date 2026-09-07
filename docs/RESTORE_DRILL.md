@@ -20,3 +20,7 @@ Read-only Railway CLI checks on the production Postgres service confirmed:
 Creating the initial managed snapshot failed with `OAUTH_INSUFFICIENT_GRANT`. No managed backup was created, no schedule was changed, and no production restore was attempted. Reauthenticate the Railway CLI with project access before retrying snapshot creation and enabling daily/weekly schedules. Verify both the resulting backup record and schedule retention after success.
 
 Railway's [recovery guide](https://docs.railway.com/guides/postgres-backups-restores) distinguishes ordinary volume snapshots, which restore to the original service, from point-in-time recovery into a new service and portable logical dumps. Do not run an ordinary production volume restore as an isolated drill. Select and verify a separate target first. The passing synthetic CI drill remains the only completed restoration evidence.
+
+## Update - September 7, 2026
+
+The dashboard identified managed backups/PITR as Pro-only; reauthentication still did not permit snapshot creation. A real production encrypted logical backup and isolated local restore have now passed. See [MANUAL_BACKUP.md](MANUAL_BACKUP.md) for the verification scope, tooling, manual release workflow and remaining independent-copy/key-escrow limitations. Earlier statements above describe the September 6 audit, not the current logical-backup status.

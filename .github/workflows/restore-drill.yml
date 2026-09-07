@@ -51,3 +51,19 @@ jobs:
         env:
           KUDIROLL_DATABASE_URL: postgresql://postgres:synthetic-ci-only@127.0.0.1:5432/kudiroll_restore_target
         run: node --import tsx scripts/restore-drill.ts verify
+
+      - name: Verify encrypted manual backup and local restore
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          KUDI_BACKUP_SOURCE_URL: postgresql://postgres:synthetic-ci-only@127.0.0.1:5432/kudiroll_restore_source
+          KUDI_BACKUP_TARGET_URL: postgresql://postgres:synthetic-ci-only@127.0.0.1:5432/kudiroll_recovery_encrypted
+        run: |
+          export KUDI_BACKUP_KEY=$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64url'))")
+          printf '%s\n' '#!/bin/sh' 'exec docker exec -i -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE -e PGSSLMODE "$POSTGRES_CONTAINER" pg_dump "$@"' > output/pg-dump-wrapper.sh
+          printf '%s\n' '#!/bin/sh' 'exec docker exec -i -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE -e PGSSLMODE "$POSTGRES_CONTAINER" pg_restore "$@"' > output/pg-restore-wrapper.sh
+          chmod +x output/pg-*-wrapper.sh
+          export PG_DUMP_BIN="$PWD/output/pg-dump-wrapper.sh"
+          export PG_RESTORE_BIN="$PWD/output/pg-restore-wrapper.sh"
+          docker exec "$POSTGRES_CONTAINER" createdb -U postgres kudiroll_recovery_encrypted
+          node --import tsx scripts/manual-backup.ts backup output/restore-drill/manual.enc
+          node --import tsx scripts/manual-backup.ts verify output/restore-drill/manual.enc
